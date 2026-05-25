@@ -1,0 +1,12 @@
+[build]
+dockerfile = "Dockerfile"
+
+[deploy]
+startCommand = "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/api/kpis"
+restartPolicyType = "on_failure"
+
+[[services]]
+name = "sync-cron"
+cronSchedule = "0 6 * * *"
+startCommand = "python sync/sync.py"

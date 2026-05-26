@@ -2,7 +2,7 @@
 dockerfile = "Dockerfile"
 
 [deploy]
-startCommand = "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+startCommand = "sh -c 'uvicorn api.main:app --host 0.0.0.0 --port $PORT'"
 healthcheckPath = "/api/kpis"
 restartPolicyType = "on_failure"
 

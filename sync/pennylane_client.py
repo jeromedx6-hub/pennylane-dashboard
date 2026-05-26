@@ -1,9 +1,10 @@
 import os
 import requests
-from datetime import date, timedelta
-from typing import Optional
+from datetime import date
+import time
 
-BASE_URL = "https://app.pennylane.com/api/external/v1"
+BASE_URL = "https://app.pennylane.com/api/external/v2"
+RATE_LIMIT_DELAY = 0.26  # 4 req/s max
 
 
 class PennylaneClient:
@@ -12,7 +13,6 @@ class PennylaneClient:
         self.session.headers.update({
             "Authorization": f"Bearer {api_token}",
             "Accept": "application/json",
-            "Content-Type": "application/json",
         })
 
     def _get(self, endpoint: str, params: dict = None) -> dict:
@@ -21,45 +21,43 @@ class PennylaneClient:
         resp.raise_for_status()
         return resp.json()
 
-    def _paginate(self, endpoint: str, params: dict = None) -> list:
+    def _paginate_cursor(self, endpoint: str, params: dict = None) -> list:
+        """Pagination cursor (API v2 : has_more / next_cursor)."""
         params = params or {}
         params.setdefault("per_page", 100)
         results = []
-        page = 1
         while True:
-            params["page"] = page
             data = self._get(endpoint, params)
-            items = data.get("transactions") or data.get("items") or data.get("invoices") or []
+            items = data.get("items", [])
             results.extend(items)
-            total_pages = data.get("total_pages", 1)
-            if page >= total_pages:
+            time.sleep(RATE_LIMIT_DELAY)
+            if not data.get("has_more"):
                 break
-            page += 1
+            params["cursor"] = data["next_cursor"]
         return results
 
     def get_customer_invoices(self, date_from: date, date_to: date) -> list:
-        """Factures clients (CA encaissé)."""
-        return self._paginate("customer_invoices", {
-            "filter[date][gte]": date_from.isoformat(),
-            "filter[date][lte]": date_to.isoformat(),
-            "filter[status]": "paid",
+        return self._paginate_cursor("customer_invoices", {
+            "date_gte": date_from.isoformat(),
+            "date_lte": date_to.isoformat(),
+            "status":   "paid",
         })
 
     def get_supplier_invoices(self, date_from: date, date_to: date) -> list:
-        """Factures fournisseurs (charges)."""
-        return self._paginate("supplier_invoices", {
-            "filter[date][gte]": date_from.isoformat(),
-            "filter[date][lte]": date_to.isoformat(),
+        return self._paginate_cursor("supplier_invoices", {
+            "date_gte": date_from.isoformat(),
+            "date_lte": date_to.isoformat(),
         })
 
-    def get_transactions(self, date_from: date, date_to: date) -> list:
-        """Transactions bancaires brutes."""
-        return self._paginate("transactions", {
-            "filter[date][gte]": date_from.isoformat(),
-            "filter[date][lte]": date_to.isoformat(),
-        })
+    def get_invoice_categories(self, invoice_type: str, invoice_id: int) -> list:
+        """Retourne les catégories d'une facture (appel séparé requis en v2)."""
+        try:
+            data = self._get(f"{invoice_type}/{invoice_id}/categories")
+            time.sleep(RATE_LIMIT_DELAY)
+            return data.get("items", [])
+        except Exception:
+            return []
 
     def get_categories(self) -> list:
-        """Toutes les catégories analytiques configurées."""
-        data = self._get("plan_items")
-        return data.get("plan_items", [])
+        data = self._get("categories")
+        return data.get("items", [])

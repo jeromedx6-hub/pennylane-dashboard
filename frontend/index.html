@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FinBoard — Dashboard Financier</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#e2e8f0; font-size:13px; }
@@ -196,17 +197,35 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="grid-3">
     <div class="card">
       <div class="card-header">
-        <div><div class="card-title">Décomposition CA mensuelle</div><div class="card-sub">Coûts + Marge</div></div>
-        <div class="legend">
-          <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Acquisition</div>
-          <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Sales</div>
-          <div class="legend-item"><div class="legend-dot" style="background:#14b8a6"></div>Opérationnel</div>
-          <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>Structure</div>
-          <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>Marge</div>
+        <div>
+          <div class="card-title">Décomposition CA mensuelle</div>
+          <div class="card-sub">CA = coûts + marge</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <!-- Combo mois -->
+          <select id="evol-period" onchange="onEvolPeriodChange()" style="background:#12141e;border:1px solid #2d3148;border-radius:6px;color:#94a3b8;padding:5px 10px;font-size:11px;cursor:pointer">
+            <option value="12">12 derniers mois</option>
+            <option value="6">6 derniers mois</option>
+            <option value="3">3 derniers mois</option>
+            <option value="year-2026">2026</option>
+            <option value="year-2025">2025</option>
+          </select>
+          <!-- Toggle €/% -->
+          <div style="display:flex;background:#12141e;border:1px solid #2d3148;border-radius:6px;overflow:hidden">
+            <button id="btn-eur" onclick="setEvolMode('eur')" style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:#6366f1;color:#fff">€</button>
+            <button id="btn-pct" onclick="setEvolMode('pct')" style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:transparent;color:#475569">%</button>
+          </div>
+          <!-- Légende -->
+          <div class="legend" style="gap:10px">
+            <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Acq.</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Sales</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#14b8a6"></div>Ops</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>Structure</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>Marge</div>
+          </div>
         </div>
       </div>
-      <div id="month-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
-      <canvas id="chart-evolution" height="180"></canvas>
+      <canvas id="chart-evolution" height="190"></canvas>
     </div>
 
     <div class="card">
@@ -385,84 +404,129 @@ function renderKPIs(d) {
   }
 }
 
-// ── Evolution Chart (stacked) ────────────────────────────────
-let evolAllData   = [];   // toutes les données brutes
-let selectedMonths = new Set(); // mois actifs (string YYYY-MM)
+// ── Evolution Chart (stacked décomposé) ─────────────────────
+let evolAllData = [];
+let evolMode    = 'eur'; // 'eur' | 'pct'
+
+function fmtShort(v) {
+  const a = Math.abs(v);
+  if (a >= 1000000) return (v/1000000).toFixed(1)+'M';
+  if (a >= 1000)    return (v/1000).toFixed(0)+'k';
+  return Math.round(v).toString();
+}
 
 function renderEvolution(data) {
   if (!data || !data.length) return;
   evolAllData = data;
-
-  // Init selection : tous sélectionnés
-  if (!selectedMonths.size) {
-    data.forEach(r => selectedMonths.add(r.month.slice(0,7)));
-  }
-
-  // Chips mois
-  const chipsEl = document.getElementById('month-chips');
-  chipsEl.innerHTML = data.map(r => {
-    const m = r.month.slice(0,7);
-    const on = selectedMonths.has(m);
-    return `<button onclick="toggleMonth('${m}')" data-m="${m}" style="
-      padding:4px 10px;border-radius:20px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid;
-      background:${on?'#6366f1':'transparent'};color:${on?'#fff':'#475569'};
-      border-color:${on?'#6366f1':'#2d3148'};transition:all .15s">${monthLabel(m)}</button>`;
-  }).join('');
-
   drawStackedChart();
 }
 
-function toggleMonth(m) {
-  if (selectedMonths.has(m)) {
-    if (selectedMonths.size > 1) selectedMonths.delete(m); // garder au moins 1
+function onEvolPeriodChange() {
+  const val = document.getElementById('evol-period').value;
+  if (val.startsWith('year-')) {
+    const yr = val.split('-')[1];
+    fetch(`${API}/api/evolution?months=24`).then(r=>r.json()).then(d => {
+      evolAllData = (d.data||[]).filter(r => r.month.startsWith(yr));
+      drawStackedChart();
+    });
   } else {
-    selectedMonths.add(m);
+    const n = parseInt(val);
+    fetch(`${API}/api/evolution?months=${n}`).then(r=>r.json()).then(d => {
+      evolAllData = d.data||[];
+      drawStackedChart();
+    });
   }
-  // Mettre à jour le chip
-  document.querySelectorAll('#month-chips button').forEach(btn => {
-    const on = selectedMonths.has(btn.dataset.m);
-    btn.style.background    = on ? '#6366f1' : 'transparent';
-    btn.style.color         = on ? '#fff'    : '#475569';
-    btn.style.borderColor   = on ? '#6366f1' : '#2d3148';
-  });
+}
+
+function setEvolMode(mode) {
+  evolMode = mode;
+  document.getElementById('btn-eur').style.background = mode==='eur' ? '#6366f1' : 'transparent';
+  document.getElementById('btn-eur').style.color      = mode==='eur' ? '#fff'    : '#475569';
+  document.getElementById('btn-pct').style.background = mode==='pct' ? '#6366f1' : 'transparent';
+  document.getElementById('btn-pct').style.color      = mode==='pct' ? '#fff'    : '#475569';
   drawStackedChart();
 }
 
 function drawStackedChart() {
-  const filtered = evolAllData.filter(r => selectedMonths.has(r.month.slice(0,7)));
-  const labels   = filtered.map(r => monthLabel(r.month.slice(0,7)));
+  const data    = evolAllData.filter(r => parseFloat(r.ca_ht||0) > 0);
+  if (!data.length) return;
 
-  const n = v => Math.abs(parseFloat(v || 0));
-  const acq   = filtered.map(r => n(r.total_acquisition));
-  const sales = filtered.map(r => n(r.total_sales));
-  const ops   = filtered.map(r => n(r.total_ops));
-  const strct = filtered.map(r => n(r.total_structure));
-  const marge = filtered.map(r => parseFloat(r.ebitda || 0));
+  const labels  = data.map(r => monthLabel(r.month.slice(0,7)));
+  const caArr   = data.map(r => parseFloat(r.ca_ht||0));
+  const isPct   = evolMode === 'pct';
+
+  const val = (r, field) => {
+    const raw = Math.abs(parseFloat(r[field]||0));
+    return isPct ? (caArr[data.indexOf(r)] ? parseFloat((raw/caArr[data.indexOf(r)]*100).toFixed(1)) : 0) : raw;
+  };
+  const mrgVal = (r, i) => {
+    const raw = parseFloat(r.ebitda||0);
+    return isPct ? (caArr[i] ? parseFloat((raw/caArr[i]*100).toFixed(1)) : 0) : raw;
+  };
+
+  const acq   = data.map(r => val(r,'total_acquisition'));
+  const sales = data.map(r => val(r,'total_sales'));
+  const ops   = data.map(r => val(r,'total_ops'));
+  const strct = data.map(r => val(r,'total_structure'));
+  const marge = data.map((r,i) => mrgVal(r,i));
 
   const ctx = document.getElementById('chart-evolution').getContext('2d');
   if (chartEvol) chartEvol.destroy();
 
+  const THRESHOLD = isPct ? 3 : null; // masquer label si < 3%
+
   chartEvol = new Chart(ctx, {
     type: 'bar',
+    plugins: [ChartDataLabels],
     data: {
       labels,
       datasets: [
-        { label:'Acquisition',   data:acq,   backgroundColor:'#f97316', stack:'s' },
-        { label:'Sales',         data:sales, backgroundColor:'#3b82f6', stack:'s' },
-        { label:'Opérationnel',  data:ops,   backgroundColor:'#14b8a6', stack:'s' },
-        { label:'Structure',     data:strct, backgroundColor:'#8b5cf6', stack:'s' },
-        { label:'Marge',         data:marge, backgroundColor:'#4ade80', stack:'s' },
+        { label:'Acquisition',  data:acq,   backgroundColor:'#f97316', stack:'s' },
+        { label:'Sales',        data:sales, backgroundColor:'#3b82f6', stack:'s' },
+        { label:'Opérationnel', data:ops,   backgroundColor:'#14b8a6', stack:'s' },
+        { label:'Structure',    data:strct, backgroundColor:'#8b5cf6', stack:'s' },
+        { label:'Marge',        data:marge, backgroundColor:'#4ade80', stack:'s' },
       ]
     },
     options: {
       responsive:true, interaction:{mode:'index',intersect:false},
       plugins:{
         legend:{ display:false },
-        tooltip:{ callbacks:{ label: c => ` ${c.dataset.label}: ${fmtEur(c.raw)}` } }
+        tooltip:{
+          callbacks:{
+            label: c => {
+              const v = c.raw;
+              return ` ${c.dataset.label}: ${isPct ? v+'%' : fmtEur(v)}`;
+            },
+            footer: items => {
+              const i = items[0].dataIndex;
+              const ca = caArr[i];
+              return isPct ? `CA total : 100% (${fmtEur(ca)})` : `CA total : ${fmtEur(ca)}`;
+            }
+          }
+        },
+        datalabels:{
+          color:'rgba(255,255,255,0.9)',
+          font:{ size:9, weight:'600' },
+          anchor:'center', align:'center',
+          display: ctx => {
+            const v = Math.abs(ctx.dataset.data[ctx.dataIndex]);
+            if (!v) return false;
+            if (isPct) return v >= 4;
+            // en €, masquer si la barre représente < 5% du CA
+            const ca = caArr[ctx.dataIndex];
+            return ca ? (v/ca) >= 0.05 : false;
+          },
+          formatter: v => isPct ? Math.abs(v).toFixed(1)+'%' : fmtShort(Math.abs(v))+'€',
+        }
       },
       scales:{
         x:{ stacked:true, grid:{color:'#1e2235'}, ticks:{color:'#475569',font:{size:10}} },
-        y:{ stacked:true, grid:{color:'#1e2235'}, ticks:{color:'#475569',font:{size:10}, callback: v => fmtEur(v)} },
+        y:{ stacked:true, grid:{color:'#1e2235'},
+          ticks:{color:'#475569',font:{size:10},
+            callback: v => isPct ? v+'%' : fmtShort(v)+'€'
+          }
+        },
       }
     }
   });

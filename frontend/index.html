@@ -481,6 +481,17 @@ function renderPL(plData, kpis) {
     }
 
     if (s > 1 && mcs[s] !== undefined) {
+      // Ligne total coûts de la section
+      const TOTAL_LABELS = { 2:'Total Coûts Acquisition', 3:'Total Sales & Closing', 4:'Total Opérationnel', 5:'Total Structure' };
+      const sectionTotal = rows.filter(r => !r.is_revenue).reduce((sum,r) => sum + Math.abs(r.amount), 0);
+      if (sectionTotal > 0) {
+        html += `<tr class="subtotal">
+          <td>${TOTAL_LABELS[s]}</td>
+          <td class="negative">— ${fmtEur(sectionTotal)}</td>
+          <td>${fmt(sectionTotal/ca*100,1)}%</td>
+        </tr>`;
+      }
+      // Ligne marge
       const mc  = mcs[s];
       const cls = mc >= 0 ? 'positive' : 'negative';
       const isEbitda = s === 5;

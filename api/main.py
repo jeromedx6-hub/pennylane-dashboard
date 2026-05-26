@@ -126,7 +126,7 @@ def get_evolution(months: int = Query(default=12)):
 
     rows = (
         sb.table("kpis_monthly")
-        .select("month, ca_ht, total_charges, ebitda, roas_cash")
+        .select("month, ca_ht, total_acquisition, total_sales, total_ops, total_structure, ebitda")
         .gte("month", d_from.isoformat())
         .order("month")
         .execute()

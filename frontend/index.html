@@ -196,14 +196,17 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="grid-3">
     <div class="card">
       <div class="card-header">
-        <div><div class="card-title">Évolution CA vs Charges vs EBITDA</div><div class="card-sub">12 derniers mois</div></div>
+        <div><div class="card-title">Décomposition CA mensuelle</div><div class="card-sub">Coûts + Marge</div></div>
         <div class="legend">
-          <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>CA HT</div>
-          <div class="legend-item"><div class="legend-dot" style="background:#f87171"></div>Charges</div>
-          <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>EBITDA</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Acquisition</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Sales</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#14b8a6"></div>Opérationnel</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>Structure</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>Marge</div>
         </div>
       </div>
-      <canvas id="chart-evolution" height="160"></canvas>
+      <div id="month-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
+      <canvas id="chart-evolution" height="180"></canvas>
     </div>
 
     <div class="card">
@@ -382,33 +385,84 @@ function renderKPIs(d) {
   }
 }
 
-// ── Evolution Chart ──────────────────────────────────────────
+// ── Evolution Chart (stacked) ────────────────────────────────
+let evolAllData   = [];   // toutes les données brutes
+let selectedMonths = new Set(); // mois actifs (string YYYY-MM)
+
 function renderEvolution(data) {
   if (!data || !data.length) return;
+  evolAllData = data;
 
-  const labels  = data.map(r => monthLabel(r.month.slice(0,7)));
-  const ca      = data.map(r => parseFloat(r.ca_ht || 0));
-  const charges = data.map(r => parseFloat(r.total_charges || 0));
-  const ebitda  = data.map(r => parseFloat(r.ebitda || 0));
+  // Init selection : tous sélectionnés
+  if (!selectedMonths.size) {
+    data.forEach(r => selectedMonths.add(r.month.slice(0,7)));
+  }
+
+  // Chips mois
+  const chipsEl = document.getElementById('month-chips');
+  chipsEl.innerHTML = data.map(r => {
+    const m = r.month.slice(0,7);
+    const on = selectedMonths.has(m);
+    return `<button onclick="toggleMonth('${m}')" data-m="${m}" style="
+      padding:4px 10px;border-radius:20px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid;
+      background:${on?'#6366f1':'transparent'};color:${on?'#fff':'#475569'};
+      border-color:${on?'#6366f1':'#2d3148'};transition:all .15s">${monthLabel(m)}</button>`;
+  }).join('');
+
+  drawStackedChart();
+}
+
+function toggleMonth(m) {
+  if (selectedMonths.has(m)) {
+    if (selectedMonths.size > 1) selectedMonths.delete(m); // garder au moins 1
+  } else {
+    selectedMonths.add(m);
+  }
+  // Mettre à jour le chip
+  document.querySelectorAll('#month-chips button').forEach(btn => {
+    const on = selectedMonths.has(btn.dataset.m);
+    btn.style.background    = on ? '#6366f1' : 'transparent';
+    btn.style.color         = on ? '#fff'    : '#475569';
+    btn.style.borderColor   = on ? '#6366f1' : '#2d3148';
+  });
+  drawStackedChart();
+}
+
+function drawStackedChart() {
+  const filtered = evolAllData.filter(r => selectedMonths.has(r.month.slice(0,7)));
+  const labels   = filtered.map(r => monthLabel(r.month.slice(0,7)));
+
+  const n = v => Math.abs(parseFloat(v || 0));
+  const acq   = filtered.map(r => n(r.total_acquisition));
+  const sales = filtered.map(r => n(r.total_sales));
+  const ops   = filtered.map(r => n(r.total_ops));
+  const strct = filtered.map(r => n(r.total_structure));
+  const marge = filtered.map(r => parseFloat(r.ebitda || 0));
 
   const ctx = document.getElementById('chart-evolution').getContext('2d');
   if (chartEvol) chartEvol.destroy();
 
   chartEvol = new Chart(ctx, {
+    type: 'bar',
     data: {
       labels,
       datasets: [
-        { type:'bar',  label:'CA HT',    data:ca,      backgroundColor:'rgba(99,102,241,.75)', borderRadius:4 },
-        { type:'line', label:'Charges',  data:charges, borderColor:'#f87171', backgroundColor:'transparent', borderWidth:2, tension:.3, pointRadius:3 },
-        { type:'line', label:'EBITDA',   data:ebitda,  borderColor:'#4ade80', backgroundColor:'transparent', borderWidth:2, tension:.3, pointRadius:3 },
+        { label:'Acquisition',   data:acq,   backgroundColor:'#f97316', stack:'s' },
+        { label:'Sales',         data:sales, backgroundColor:'#3b82f6', stack:'s' },
+        { label:'Opérationnel',  data:ops,   backgroundColor:'#14b8a6', stack:'s' },
+        { label:'Structure',     data:strct, backgroundColor:'#8b5cf6', stack:'s' },
+        { label:'Marge',         data:marge, backgroundColor:'#4ade80', stack:'s' },
       ]
     },
     options: {
       responsive:true, interaction:{mode:'index',intersect:false},
-      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${fmtEur(ctx.raw)}` } } },
+      plugins:{
+        legend:{ display:false },
+        tooltip:{ callbacks:{ label: c => ` ${c.dataset.label}: ${fmtEur(c.raw)}` } }
+      },
       scales:{
-        x:{ grid:{color:'#1e2235'}, ticks:{color:'#475569',font:{size:10}} },
-        y:{ grid:{color:'#1e2235'}, ticks:{color:'#475569',font:{size:10}, callback: v => fmtEur(v)} },
+        x:{ stacked:true, grid:{color:'#1e2235'}, ticks:{color:'#475569',font:{size:10}} },
+        y:{ stacked:true, grid:{color:'#1e2235'}, ticks:{color:'#475569',font:{size:10}, callback: v => fmtEur(v)} },
       }
     }
   });

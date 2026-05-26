@@ -129,7 +129,10 @@ def compute_kpis(sb, target_date):
     marge_brute     = mc2 - total_ops
     ebitda          = marge_brute - total_structure
 
-    def pct(v, b): return round(v / b * 100, 2) if b else None
+    def pct(v, b):
+        if not b: return None
+        r = round(v / b * 100, 2)
+        return r if abs(r) < 1000 else None  # NUMERIC(5,2) max ±999.99
 
     sb.table("kpis_daily").upsert({
         "date":               date_str,

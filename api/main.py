@@ -51,6 +51,19 @@ def get_kpis(month: str = Query(default=None)):
     def pct(val):
         return round(val / ca * 100, 2) if ca else 0
 
+    # ROAS : recalculé depuis pl_daily mensuel (pub payée en lump sum, pas quotidien)
+    pl_pub = (
+        sb.table("pl_daily")
+        .select("amount")
+        .gte("date", d_from)
+        .lte("date", d_to)
+        .in_("axe3_analytics", ["Pub_Meta", "Pub_Event", "Affiliés"])
+        .execute()
+        .data
+    )
+    total_pub = sum(abs(float(r["amount"] or 0)) for r in pl_pub)
+    roas = round(ca / total_pub, 2) if total_pub else None
+
     data = {
         "ca_ht":             round(ca, 2),
         "total_charges":     round(s("total_charges"), 2),
@@ -66,7 +79,7 @@ def get_kpis(month: str = Query(default=None)):
         "marge_brute_pct":   pct(s("marge_brute")),
         "ebitda":            round(s("ebitda"), 2),
         "ebitda_pct":        pct(s("ebitda")),
-        "roas_cash":         round(s("roas_cash") / len(rows), 2) if rows else None,
+        "roas_cash":         roas,
     }
     return {"month": month, "data": data}
 
@@ -167,5 +180,6 @@ def get_transactions(
 
 
 # Sert le frontend HTML en production
-if os.path.exists("../frontend"):
-    app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
+_frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
+if os.path.exists(_frontend_dir):
+    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")

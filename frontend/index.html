@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinBoard — Dashboard Financier</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#e2e8f0; font-size:13px; }
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.sidebar { position:fixed; left:0; top:0; bottom:0; width:220px; background:#1a1d27; border-right:1px solid #2d3148; padding:24px 16px; z-index:10; display:flex; flex-direction:column; }
+.logo { font-size:15px; font-weight:700; color:#fff; margin-bottom:32px; padding:0 8px; display:flex; align-items:center; gap:10px; }
+.logo-icon { background:#6366f1; color:#fff; width:28px; height:28px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; }
+.nav-label { font-size:10px; font-weight:600; color:#4b5563; text-transform:uppercase; letter-spacing:.08em; padding:0 8px; margin-bottom:8px; margin-top:20px; }
+.nav-item { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px; cursor:pointer; color:#94a3b8; font-size:13px; margin-bottom:2px; transition:all .15s; }
+.nav-item:hover { background:#252840; color:#e2e8f0; }
+.nav-item.active { background:#252840; color:#fff; font-weight:500; border-left:3px solid #6366f1; padding-left:7px; }
+.sidebar-bottom { margin-top:auto; }
+.client-badge { background:#12141e; border:1px solid #2d3148; border-radius:8px; padding:10px 12px; font-size:11px; color:#64748b; }
+.client-badge strong { color:#94a3b8; display:block; margin-bottom:2px; }
+
+/* ── Main ────────────────────────────────────────────────── */
+.main { margin-left:220px; padding:24px; min-height:100vh; }
+.page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+.page-title { font-size:20px; font-weight:700; color:#fff; }
+.page-title span { color:#6366f1; }
+.header-sub { font-size:11px; color:#475569; margin-top:4px; }
+.header-right { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.date-selector { display:flex; background:#1a1d27; border:1px solid #2d3148; border-radius:8px; overflow:hidden; }
+.date-btn { padding:7px 14px; cursor:pointer; color:#64748b; font-size:12px; transition:all .15s; border:none; background:none; }
+.date-btn.active { background:#6366f1; color:#fff; font-weight:500; }
+.month-picker { background:#1a1d27; border:1px solid #2d3148; border-radius:8px; padding:7px 14px; color:#94a3b8; font-size:12px; cursor:pointer; }
+.sync-badge { display:flex; align-items:center; gap:6px; font-size:11px; color:#4ade80; background:rgba(74,222,128,.08); border:1px solid rgba(74,222,128,.2); border-radius:6px; padding:5px 10px; }
+.dot { width:6px; height:6px; background:#4ade80; border-radius:50%; animation:pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* ── KPI Cards ───────────────────────────────────────────── */
+.kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px; }
+.kpi-card { background:#1a1d27; border:1px solid #2d3148; border-radius:12px; padding:18px 20px; position:relative; overflow:hidden; cursor:pointer; transition:transform .15s,border-color .15s,box-shadow .15s; }
+.kpi-card:hover { transform:translateY(-2px); border-color:#4b5563; box-shadow:0 8px 24px rgba(0,0,0,.3); }
+.kpi-card::after { content:''; position:absolute; top:0; left:0; right:0; height:2px; border-radius:2px 2px 0 0; }
+.kpi-card.green::after  { background:linear-gradient(90deg,#4ade80,#22c55e); }
+.kpi-card.red::after    { background:linear-gradient(90deg,#f87171,#ef4444); }
+.kpi-card.blue::after   { background:linear-gradient(90deg,#60a5fa,#3b82f6); }
+.kpi-card.purple::after { background:linear-gradient(90deg,#a78bfa,#8b5cf6); }
+.kpi-card.orange::after { background:linear-gradient(90deg,#fb923c,#f97316); }
+.kpi-hint { position:absolute; top:10px; right:12px; font-size:10px; color:#334155; transition:color .15s; }
+.kpi-card:hover .kpi-hint { color:#6366f1; }
+.kpi-label { font-size:11px; color:#64748b; font-weight:500; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
+.kpi-value { font-size:26px; font-weight:700; color:#fff; letter-spacing:-.5px; line-height:1; margin-bottom:8px; }
+.kpi-value sup { font-size:14px; font-weight:500; color:#94a3b8; vertical-align:top; margin-top:4px; }
+.kpi-deltas { display:flex; gap:8px; flex-wrap:wrap; }
+.delta { font-size:11px; display:flex; align-items:center; gap:3px; }
+.delta.up   { color:#4ade80; }
+.delta.down { color:#f87171; }
+.delta.warn { color:#fb923c; }
+.delta .tag { font-size:9px; background:#1e2235; color:#475569; padding:1px 5px; border-radius:3px; margin-left:2px; }
+
+/* ── Grids ───────────────────────────────────────────────── */
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
+.grid-3 { display:grid; grid-template-columns:2fr 1fr; gap:14px; margin-bottom:20px; }
+.card { background:#1a1d27; border:1px solid #2d3148; border-radius:12px; padding:20px; }
+.card-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px; }
+.card-title { font-size:13px; font-weight:600; color:#e2e8f0; }
+.card-sub { font-size:11px; color:#475569; margin-top:2px; }
+.legend { display:flex; gap:14px; flex-wrap:wrap; }
+.legend-item { display:flex; align-items:center; gap:5px; font-size:11px; color:#64748b; }
+.legend-dot { width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+
+/* ── P&L Table ───────────────────────────────────────────── */
+.pl-table { width:100%; border-collapse:collapse; }
+.pl-table th { font-size:10px; color:#475569; font-weight:600; text-transform:uppercase; letter-spacing:.06em; padding:0 10px 10px; text-align:right; border-bottom:1px solid #2d3148; }
+.pl-table th:first-child { text-align:left; }
+.pl-table td { padding:7px 10px; font-size:12px; color:#94a3b8; border-bottom:1px solid rgba(45,49,72,.5); text-align:right; }
+.pl-table td:first-child { text-align:left; color:#e2e8f0; }
+.pl-table tr.section-header td { background:#12141e; color:#475569; font-size:10px; text-transform:uppercase; letter-spacing:.08em; padding:10px 10px 4px; border-bottom:none; }
+.pl-table tr.subtotal td { border-top:1px solid #2d3148; border-bottom:2px solid #2d3148; font-weight:700; color:#fff; padding:9px 10px; }
+.pl-table tr.mc-row td { color:#6366f1; font-weight:600; background:rgba(99,102,241,.04); }
+.pl-table tr.ebitda-row td { background:rgba(99,102,241,.1); color:#a78bfa; font-weight:700; font-size:13px; border-top:2px solid #6366f1; }
+.positive { color:#4ade80 !important; }
+.negative { color:#f87171 !important; }
+.warn-text { color:#fb923c !important; }
+
+/* ── Ratios ──────────────────────────────────────────────── */
+.ratio-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
+.ratio-item { background:#12141e; border-radius:10px; padding:14px; border:1px solid #2d3148; }
+.ratio-name { font-size:10px; color:#475569; text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
+.ratio-val { font-size:22px; font-weight:700; color:#fff; margin-bottom:6px; }
+.ratio-tags { display:flex; gap:6px; flex-wrap:wrap; }
+.rtag { font-size:10px; padding:2px 7px; border-radius:4px; font-weight:600; }
+.rtag.up   { background:rgba(74,222,128,.1); color:#4ade80; }
+.rtag.down { background:rgba(248,113,113,.1); color:#f87171; }
+.rtag.info { background:rgba(99,102,241,.1); color:#a78bfa; }
+
+/* ── Progress bars ───────────────────────────────────────── */
+.prog-wrap { margin-bottom:12px; }
+.prog-header { display:flex; justify-content:space-between; margin-bottom:5px; font-size:12px; color:#94a3b8; }
+.prog-bar { height:5px; background:#252840; border-radius:3px; overflow:hidden; }
+.prog-fill { height:100%; border-radius:3px; }
+
+/* ── Tabs ────────────────────────────────────────────────── */
+.tabs { display:flex; gap:2px; background:#12141e; border-radius:8px; padding:3px; }
+.tab { padding:6px 14px; border-radius:6px; font-size:12px; color:#64748b; cursor:pointer; transition:all .15s; border:none; background:none; }
+.tab.active { background:#252840; color:#e2e8f0; font-weight:500; }
+
+/* ── Loading skeleton ────────────────────────────────────── */
+.skeleton { background:linear-gradient(90deg,#1e2235 25%,#252840 50%,#1e2235 75%); background-size:200% 100%; animation:shimmer 1.5s infinite; border-radius:4px; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+/* ── Modal ───────────────────────────────────────────────── */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:100; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+.modal-overlay.open { display:flex; }
+.modal { background:#1a1d27; border:1px solid #2d3148; border-radius:16px; width:780px; max-width:95vw; max-height:88vh; overflow-y:auto; padding:28px; position:relative; animation:modalIn .2s ease; }
+@keyframes modalIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+.modal-close { position:absolute; top:16px; right:16px; width:28px; height:28px; border-radius:6px; background:#252840; border:none; color:#94a3b8; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; transition:background .15s; }
+.modal-close:hover { background:#2d3148; color:#fff; }
+.modal-title { font-size:16px; font-weight:700; color:#fff; margin-bottom:4px; }
+.modal-sub { font-size:12px; color:#475569; margin-bottom:20px; }
+.modal-kpi-row { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
+.modal-kpi { background:#12141e; border-radius:10px; padding:14px 16px; border:1px solid #2d3148; }
+.modal-kpi-label { font-size:10px; color:#475569; text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
+.modal-kpi-val { font-size:20px; font-weight:700; color:#fff; margin-bottom:6px; }
+.modal-section { font-size:12px; font-weight:600; color:#94a3b8; margin-bottom:10px; border-bottom:1px solid #2d3148; padding-bottom:8px; margin-top:16px; }
+.detail-table { width:100%; border-collapse:collapse; }
+.detail-table th { font-size:10px; color:#475569; font-weight:600; text-transform:uppercase; letter-spacing:.06em; padding:0 10px 8px; text-align:right; border-bottom:1px solid #2d3148; }
+.detail-table th:first-child { text-align:left; }
+.detail-table td { padding:8px 10px; font-size:12px; color:#94a3b8; border-bottom:1px solid rgba(45,49,72,.4); text-align:right; }
+.detail-table td:first-child { text-align:left; color:#e2e8f0; }
+.detail-table tr:last-child td { border-bottom:none; font-weight:600; color:#fff; border-top:1px solid #2d3148; }
+
+::-webkit-scrollbar { width:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#2d3148; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<!-- ════ SIDEBAR ════════════════════════════════════════════ -->
+<div class="sidebar">
+  <div class="logo"><div class="logo-icon">📊</div> FinBoard</div>
+  <div class="nav-label">Analyse</div>
+  <div class="nav-item active">⬡ &nbsp;Indicateurs</div>
+  <div class="nav-item">≡ &nbsp;P&L Analytique</div>
+  <div class="nav-item">◎ &nbsp;Acquisition</div>
+  <div class="nav-item">◈ &nbsp;Sales & Closing</div>
+  <div class="nav-label">Opérationnel</div>
+  <div class="nav-item">◷ &nbsp;Trésorerie</div>
+  <div class="nav-item">⊞ &nbsp;Charges détail</div>
+  <div class="sidebar-bottom">
+    <div class="client-badge">
+      <strong id="client-name">Dashboard Financier</strong>
+      <span id="last-sync">Chargement…</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════ MAIN ════════════════════════════════════════════════ -->
+<div class="main">
+
+  <!-- Header -->
+  <div class="page-header">
+    <div>
+      <div class="page-title">Indicateurs <span>Financiers</span></div>
+      <div class="header-sub" id="header-sub">Données Pennylane · Sync quotidienne automatique</div>
+    </div>
+    <div class="header-right">
+      <div class="date-selector">
+        <button class="date-btn" onclick="setWindow('today')">Aujourd'hui</button>
+        <button class="date-btn active" id="btn-month" onclick="setWindow('month')">Ce mois</button>
+        <button class="date-btn" onclick="setWindow('ytd')">YTD</button>
+      </div>
+      <input type="month" class="month-picker" id="month-picker" onchange="onMonthChange(this.value)">
+      <div class="sync-badge"><div class="dot"></div><span id="sync-time">Sync OK</span></div>
+    </div>
+  </div>
+
+  <!-- KPI Row 1 -->
+  <div class="kpi-grid" id="kpi-row1">
+    <div class="kpi-card green"  onclick="openModal('ca')">      <div class="kpi-hint">↗ détail</div><div class="kpi-label">CA Encaissé HT</div>      <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card red"   onclick="openModal('charges')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Total Charges</div>        <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card blue"  onclick="openModal('ebitda')">  <div class="kpi-hint">↗ détail</div><div class="kpi-label">EBITDA</div>              <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card purple" onclick="openModal('marge')">  <div class="kpi-hint">↗ détail</div><div class="kpi-label">Marge EBITDA</div>        <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+  </div>
+
+  <!-- KPI Row 2 -->
+  <div class="kpi-grid" id="kpi-row2">
+    <div class="kpi-card orange" onclick="openModal('roas')">   <div class="kpi-hint">↗ détail</div><div class="kpi-label">ROAS Cash</div>           <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card blue"  onclick="openModal('mc1')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">MC1 (après Acq.)</div>   <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card green" onclick="openModal('mc2')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">MC2 (après Sales)</div> <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card purple" onclick="openModal('charges')"><div class="kpi-hint">↗ détail</div><div class="kpi-label">Marge Brute</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+  </div>
+
+  <!-- Charts row -->
+  <div class="grid-3">
+    <div class="card">
+      <div class="card-header">
+        <div><div class="card-title">Évolution CA vs Charges vs EBITDA</div><div class="card-sub">12 derniers mois</div></div>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>CA HT</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#f87171"></div>Charges</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>EBITDA</div>
+        </div>
+      </div>
+      <canvas id="chart-evolution" height="160"></canvas>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Répartition charges</div><div class="card-sub" id="charges-sub">Ce mois</div></div></div>
+      <canvas id="chart-donut" height="160"></canvas>
+      <div id="charges-bars" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <!-- P&L + Ratios -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">
+        <div><div class="card-title">P&L Analytique · Synthèse</div><div class="card-sub" id="pl-sub">Ce mois</div></div>
+        <div class="tabs">
+          <button class="tab active" onclick="switchPL('month',this)">Mois</button>
+          <button class="tab" onclick="switchPL('ytd',this)">YTD</button>
+        </div>
+      </div>
+      <table class="pl-table" id="pl-table">
+        <thead><tr><th style="width:45%">Poste</th><th>Réalisé</th><th>% CA</th></tr></thead>
+        <tbody id="pl-body"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="card-title">Ratios & KPIs</div><div class="card-sub" id="ratios-sub">Ce mois</div></div>
+      <div class="ratio-grid" id="ratio-grid"></div>
+      <div style="border-top:1px solid #2d3148;padding-top:14px">
+        <div class="card-title" style="margin-bottom:10px;font-size:12px">CA par produit</div>
+        <div id="ca-bars"></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- ════ MODAL ════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal" onclick="closeModalOutside(event)">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-sub"   id="modal-sub"></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ── Config ───────────────────────────────────────────────────
+const API = window.location.port === '8080' || window.location.port === ''
+  ? window.location.origin
+  : 'http://localhost:8000';
+
+let state = {
+  month:    currentMonth(),
+  kpis:     null,
+  pl:       null,
+  evol:     null,
+  charges:  null,
+};
+
+let chartEvol  = null;
+let chartDonut = null;
+
+// ── Utils ────────────────────────────────────────────────────
+function currentMonth() {
+  return new Date().toISOString().slice(0,7);
+}
+
+function fmt(n, decimals=0) {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('fr-FR', {maximumFractionDigits:decimals}).format(n);
+}
+
+function fmtEur(n) {
+  if (n == null) return '—';
+  return '€ ' + fmt(Math.abs(n));
+}
+
+function fmtPct(n) {
+  if (n == null) return '—';
+  return fmt(n,1) + ' %';
+}
+
+function deltaClass(n, inverse=false) {
+  if (n == null) return '';
+  const positive = inverse ? n < 0 : n > 0;
+  return positive ? 'up' : 'down';
+}
+
+function deltaArrow(n, inverse=false) {
+  if (n == null) return '';
+  const positive = inverse ? n < 0 : n > 0;
+  return positive ? '▲' : '▼';
+}
+
+function monthLabel(iso) {
+  const [y,m] = iso.split('-');
+  return new Date(y,m-1,1).toLocaleDateString('fr-FR',{month:'short',year:'numeric'});
+}
+
+// ── Fetch ────────────────────────────────────────────────────
+async function fetchAll() {
+  const m = state.month;
+  document.getElementById('month-picker').value = m;
+
+  try {
+    const [kpis, pl, evol, charges] = await Promise.all([
+      fetch(`${API}/api/kpis?month=${m}`).then(r=>r.json()),
+      fetch(`${API}/api/pl?month=${m}`).then(r=>r.json()),
+      fetch(`${API}/api/evolution?months=12`).then(r=>r.json()),
+      fetch(`${API}/api/charges_breakdown?month=${m}`).then(r=>r.json()),
+    ]);
+
+    state.kpis    = kpis.data;
+    state.pl      = pl.data;
+    state.evol    = evol.data;
+    state.charges = charges;
+
+    renderAll();
+  } catch(e) {
+    console.error('API error', e);
+  }
+}
+
+// ── Render all ───────────────────────────────────────────────
+function renderAll() {
+  const d = state.kpis;
+  if (!d) { renderNoData(); return; }
+
+  renderKPIs(d);
+  renderEvolution(state.evol);
+  renderDonut(state.charges);
+  renderPL(state.pl, d);
+  renderRatios(d);
+  renderCAbars(state.pl);
+
+  const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('sync-time').textContent = `Sync OK · ${now}`;
+  document.getElementById('last-sync').textContent = `Dernière sync · ${now}`;
+  document.getElementById('pl-sub').textContent    = monthLabel(state.month);
+  document.getElementById('ratios-sub').textContent = monthLabel(state.month);
+  document.getElementById('charges-sub').textContent = monthLabel(state.month);
+}
+
+function renderNoData() {
+  document.getElementById('sync-time').textContent = 'Aucune donnée';
+}
+
+// ── KPI Cards ────────────────────────────────────────────────
+function renderKPIs(d) {
+  const cards = [
+    { id:'kpi-row1', items:[
+      { color:'green',  label:'CA Encaissé HT',      val: fmtEur(d.ca_ht),            sup:'', modal:'ca',      deltas:[] },
+      { color:'red',    label:'Total Charges',        val: fmtEur(d.total_charges),    sup:'', modal:'charges', deltas:[] },
+      { color:'blue',   label:'EBITDA',               val: fmtEur(d.ebitda),           sup:'', modal:'ebitda',  deltas:[] },
+      { color:'purple', label:'Marge EBITDA',         val: fmt(d.ebitda_pct,1),        sup:'%',modal:'marge',   deltas:[] },
+    ]},
+    { id:'kpi-row2', items:[
+      { color:'orange', label:'ROAS Cash',            val: d.roas_cash ? fmt(d.roas_cash,1)+'x' : '—', sup:'', modal:'roas', deltas:[] },
+      { color:'blue',   label:'MC1 (après Acq.)',     val: fmt(d.mc1_pct,1),           sup:'%',modal:'mc1',     deltas:[] },
+      { color:'green',  label:'MC2 (après Sales)',    val: fmt(d.mc2_pct,1),           sup:'%',modal:'mc2',     deltas:[] },
+      { color:'purple', label:'Marge Brute',          val: fmt(d.marge_brute_pct,1),   sup:'%',modal:'charges', deltas:[] },
+    ]},
+  ];
+
+  for (const row of cards) {
+    const el = document.getElementById(row.id);
+    el.innerHTML = row.items.map(k => `
+      <div class="kpi-card ${k.color}" onclick="openModal('${k.modal}')">
+        <div class="kpi-hint">↗ détail</div>
+        <div class="kpi-label">${k.label}</div>
+        <div class="kpi-value">${k.val}${k.sup ? `<sup>${k.sup}</sup>` : ''}</div>
+        <div class="kpi-deltas"></div>
+      </div>`).join('');
+  }
+}
+
+// ── Evolution Chart ──────────────────────────────────────────
+function renderEvolution(data) {
+  if (!data || !data.length) return;
+
+  const labels  = data.map(r => monthLabel(r.month.slice(0,7)));
+  const ca      = data.map(r => parseFloat(r.ca_ht || 0));
+  const charges = data.map(r => parseFloat(r.total_charges || 0));
+  const ebitda  = data.map(r => parseFloat(r.ebitda || 0));
+
+  const ctx = document.getElementById('chart-evolution').getContext('2d');
+  if (chartEvol) chartEvol.destroy();
+
+  chartEvol = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        { type:'bar',  label:'CA HT',    data:ca,      backgroundColor:'rgba(99,102,241,.75)', borderRadius:4 },
+        { type:'line', label:'Charges',  data:charges, borderColor:'#f87171', backgroundColor:'transparent', borderWidth:2, tension:.3, pointRadius:3 },
+        { type:'line', label:'EBITDA',   data:ebitda,  borderColor:'#4ade80', backgroundColor:'transparent', borderWidth:2, tension:.3, pointRadius:3 },
+      ]
+    },
+    options: {
+      responsive:true, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${fmtEur(ctx.raw)}` } } },
+      scales:{
+        x:{ grid:{color:'#1e2235'}, ticks:{color:'#475569',font:{size:10}} },
+        y:{ grid:{color:'#1e2235'}, ticks:{color:'#475569',font:{size:10}, callback: v => fmtEur(v)} },
+      }
+    }
+  });
+}
+
+// ── Donut Chart ──────────────────────────────────────────────
+function renderDonut(charges) {
+  if (!charges || !charges.data || !charges.data.length) return;
+
+  const COLORS = ['#6366f1','#f87171','#fb923c','#4ade80','#60a5fa','#a78bfa','#fbbf24'];
+  const items  = charges.data.slice(0,6);
+
+  const ctx = document.getElementById('chart-donut').getContext('2d');
+  if (chartDonut) chartDonut.destroy();
+
+  chartDonut = new Chart(ctx, {
+    type:'doughnut',
+    data:{
+      labels: items.map(i => i.pole),
+      datasets:[{ data: items.map(i => i.amount), backgroundColor: COLORS, borderWidth:0, hoverOffset:4 }]
+    },
+    options:{
+      responsive:true, cutout:'65%',
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ` ${ctx.label}: ${fmtEur(ctx.raw)} (${ctx.dataset.data.reduce((a,b)=>a+b,0) > 0 ? Math.round(ctx.raw/ctx.dataset.data.reduce((a,b)=>a+b,0)*100) : 0}%)` } } }
+    }
+  });
+
+  // Barres sous le donut
+  const total = charges.total || 1;
+  document.getElementById('charges-bars').innerHTML = items.map((item,i) => `
+    <div class="prog-wrap">
+      <div class="prog-header"><span>${item.pole}</span><span style="color:${COLORS[i]}">${fmtEur(item.amount)} · ${item.pct}%</span></div>
+      <div class="prog-bar"><div class="prog-fill" style="width:${item.pct}%;background:${COLORS[i]}"></div></div>
+    </div>`).join('');
+}
+
+// ── P&L Table ────────────────────────────────────────────────
+const SECTION_LABELS = { 1:'Revenus', 2:'Coûts Acquisition', 3:'Sales & Closing', 4:'Opérationnel (Delivery)', 5:'Frais de Structure' };
+const MC_LABELS      = { 2:'MC1 — Marge Contribution 1', 3:'MC2 — Marge Contribution 2', 4:'Marge Brute Analytique', 5:'EBITDA' };
+
+function renderPL(plData, kpis) {
+  if (!plData || !plData.length || !kpis) return;
+
+  const ca = kpis.ca_ht || 1;
+  const mcs = { 2: kpis.mc1, 3: kpis.mc2, 4: kpis.marge_brute, 5: kpis.ebitda };
+  const mcPcts = { 2: kpis.mc1_pct, 3: kpis.mc2_pct, 4: kpis.marge_brute_pct, 5: kpis.ebitda_pct };
+
+  // Grouper par section
+  const bySection = {};
+  for (const row of plData) {
+    const s = row.pl_section || 0;
+    if (!bySection[s]) bySection[s] = [];
+    bySection[s].push(row);
+  }
+
+  let html = '';
+  for (const s of [1,2,3,4,5]) {
+    const rows = bySection[s] || [];
+    if (!rows.length) continue;
+
+    html += `<tr class="section-header"><td colspan="3">${SECTION_LABELS[s]}</td></tr>`;
+    for (const r of rows.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))) {
+      const pct = fmt(Math.abs(r.amount)/ca*100, 1);
+      const cls = r.is_revenue ? 'positive' : '';
+      html += `<tr>
+        <td>${r.poste_budgetaire}</td>
+        <td class="${cls}">${r.is_revenue ? '' : '— '}${fmtEur(Math.abs(r.amount))}</td>
+        <td>${pct}%</td>
+      </tr>`;
+    }
+
+    if (s > 1 && mcs[s] !== undefined) {
+      const mc  = mcs[s];
+      const cls = mc >= 0 ? 'positive' : 'negative';
+      const isEbitda = s === 5;
+      html += `<tr class="${isEbitda ? 'ebitda-row' : 'mc-row'}">
+        <td>${MC_LABELS[s]}</td>
+        <td class="${cls}">${fmtEur(mc)}</td>
+        <td class="${cls}">${fmtPct(mcPcts[s])}</td>
+      </tr>`;
+    } else if (s === 1) {
+      html += `<tr class="subtotal"><td>TOTAL CA HT</td><td class="positive">${fmtEur(kpis.ca_ht)}</td><td>100%</td></tr>`;
+    }
+  }
+
+  document.getElementById('pl-body').innerHTML = html;
+}
+
+// ── Ratios ───────────────────────────────────────────────────
+function renderRatios(d) {
+  const ebitdaOk = d.ebitda_pct && d.ebitda_pct > 0;
+
+  document.getElementById('ratio-grid').innerHTML = `
+    <div class="ratio-item">
+      <div class="ratio-name">ROAS Cash</div>
+      <div class="ratio-val" style="color:#6366f1">${d.roas_cash ? fmt(d.roas_cash,1)+'x' : '—'}</div>
+      <div class="ratio-tags"><span class="rtag info">Cible > 3x</span></div>
+    </div>
+    <div class="ratio-item">
+      <div class="ratio-name">Marge EBITDA</div>
+      <div class="ratio-val" style="color:${ebitdaOk?'#4ade80':'#f87171'}">${fmtPct(d.ebitda_pct)}</div>
+      <div class="ratio-tags"><span class="rtag ${ebitdaOk?'up':'down'}">${ebitdaOk?'✓ Positif':'⚠ Négatif'}</span></div>
+    </div>
+    <div class="ratio-item">
+      <div class="ratio-name">MC1</div>
+      <div class="ratio-val" style="color:#a78bfa">${fmtPct(d.mc1_pct)}</div>
+      <div class="ratio-tags"><span class="rtag info">Après acquisition</span></div>
+    </div>
+    <div class="ratio-item">
+      <div class="ratio-name">MC2</div>
+      <div class="ratio-val" style="color:#60a5fa">${fmtPct(d.mc2_pct)}</div>
+      <div class="ratio-tags"><span class="rtag info">Après sales</span></div>
+    </div>`;
+}
+
+// ── CA par produit ───────────────────────────────────────────
+function renderCAbars(plData) {
+  if (!plData) return;
+  const caRows = plData.filter(r => r.pl_section===1 && r.is_revenue);
+  const total  = caRows.reduce((s,r) => s + Math.abs(r.amount), 0) || 1;
+  const sorted = caRows.sort((a,b) => Math.abs(b.amount)-Math.abs(a.amount)).slice(0,6);
+
+  const COLORS = ['linear-gradient(90deg,#6366f1,#8b5cf6)','linear-gradient(90deg,#3b82f6,#6366f1)','linear-gradient(90deg,#60a5fa,#3b82f6)','linear-gradient(90deg,#a78bfa,#6366f1)','linear-gradient(90deg,#4ade80,#3b82f6)','linear-gradient(90deg,#fb923c,#f97316)'];
+
+  document.getElementById('ca-bars').innerHTML = sorted.map((r,i) => {
+    const pct = Math.round(Math.abs(r.amount)/total*100);
+    return `<div class="prog-wrap">
+      <div class="prog-header"><span>${r.poste_budgetaire}</span><span>${fmtEur(Math.abs(r.amount))} <span style="font-size:10px;color:#475569">${pct}%</span></span></div>
+      <div class="prog-bar"><div class="prog-fill" style="width:${pct}%;background:${COLORS[i]}"></div></div>
+    </div>`;
+  }).join('');
+}
+
+// ── Month selector ───────────────────────────────────────────
+function setWindow(w) {
+  document.querySelectorAll('.date-btn').forEach(b=>b.classList.remove('active'));
+  if (w==='month') {
+    state.month = currentMonth();
+    document.getElementById('btn-month').classList.add('active');
+    fetchAll();
+  }
+}
+
+function onMonthChange(val) {
+  state.month = val;
+  document.querySelectorAll('.date-btn').forEach(b=>b.classList.remove('active'));
+  fetchAll();
+}
+
+function switchPL(mode, btn) {
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Modal ────────────────────────────────────────────────────
+async function openModal(type) {
+  const d = state.kpis;
+  if (!d) return;
+  document.getElementById('modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  const m = state.month;
+  document.getElementById('modal-sub').textContent = `${monthLabel(m)} · Source : Pennylane`;
+
+  switch(type) {
+    case 'ca':
+      document.getElementById('modal-title').textContent = 'CA Encaissé HT — Détail par produit';
+      renderModalCA(d);
+      break;
+    case 'charges':
+      document.getElementById('modal-title').textContent = 'Charges — Détail par pôle';
+      renderModalCharges(d, state.charges);
+      break;
+    case 'ebitda':
+    case 'marge':
+      document.getElementById('modal-title').textContent = 'EBITDA — Cascade P&L';
+      renderModalEbitda(d);
+      break;
+    case 'mc1':
+      document.getElementById('modal-title').textContent = 'MC1 — Marge de Contribution 1';
+      renderModalMC(d, 1);
+      break;
+    case 'mc2':
+      document.getElementById('modal-title').textContent = 'MC2 — Marge de Contribution 2';
+      renderModalMC(d, 2);
+      break;
+    case 'roas':
+      document.getElementById('modal-title').textContent = 'ROAS Cash — Détail Acquisition';
+      renderModalRoas(d);
+      break;
+  }
+}
+
+function kpiBlock(label, val, tags='') {
+  return `<div class="modal-kpi"><div class="modal-kpi-label">${label}</div><div class="modal-kpi-val">${val}</div>${tags}</div>`;
+}
+
+function renderModalCA(d) {
+  const pl = (state.pl || []).filter(r => r.pl_section===1 && r.is_revenue);
+  const total = d.ca_ht;
+
+  let html = `<div class="modal-kpi-row">
+    ${kpiBlock('CA Total', fmtEur(total))}
+    ${kpiBlock('Nb lignes produits', pl.length)}
+    ${kpiBlock('Marge après acq.', fmtPct(d.mc1_pct), `<div class="ratio-tags"><span class="rtag up">MC1</span></div>`)}
+  </div>
+  <div class="modal-section">Répartition par produit</div>
+  <table class="detail-table"><thead><tr><th>Produit</th><th>Montant</th><th>% CA</th></tr></thead><tbody>`;
+
+  for (const r of pl.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))) {
+    const pct = (Math.abs(r.amount)/total*100).toFixed(1);
+    html += `<tr><td>${r.poste_budgetaire}</td><td class="positive">${fmtEur(Math.abs(r.amount))}</td><td>${pct}%</td></tr>`;
+  }
+  html += `<tr><td>TOTAL</td><td class="positive">${fmtEur(total)}</td><td>100%</td></tr></tbody></table>`;
+  document.getElementById('modal-body').innerHTML = html;
+}
+
+function renderModalCharges(d, charges) {
+  const items = (charges && charges.data) || [];
+  let html = `<div class="modal-kpi-row">
+    ${kpiBlock('Total charges', fmtEur(d.total_charges))}
+    ${kpiBlock('Acquisition', fmtEur(d.total_acquisition))}
+    ${kpiBlock('Structure', fmtEur(d.total_structure))}
+  </div>
+  <div class="modal-section">Répartition par pôle</div>
+  <table class="detail-table"><thead><tr><th>Pôle</th><th>Montant</th><th>% charges</th></tr></thead><tbody>`;
+
+  for (const item of items) {
+    html += `<tr><td>${item.pole}</td><td>${fmtEur(item.amount)}</td><td>${item.pct}%</td></tr>`;
+  }
+  const total = items.reduce((s,i)=>s+i.amount, 0);
+  html += `<tr><td>TOTAL</td><td>${fmtEur(total)}</td><td>100%</td></tr></tbody></table>`;
+  document.getElementById('modal-body').innerHTML = html;
+}
+
+function renderModalEbitda(d) {
+  document.getElementById('modal-body').innerHTML = `
+  <div class="modal-kpi-row">
+    ${kpiBlock('EBITDA', fmtEur(d.ebitda))}
+    ${kpiBlock('Marge EBITDA', fmtPct(d.ebitda_pct))}
+    ${kpiBlock('CA', fmtEur(d.ca_ht))}
+  </div>
+  <div class="modal-section">Cascade CA → EBITDA</div>
+  <table class="detail-table"><thead><tr><th>Étape</th><th>Montant</th><th>% CA</th></tr></thead><tbody>
+    <tr><td>CA HT</td><td class="positive">${fmtEur(d.ca_ht)}</td><td>100%</td></tr>
+    <tr><td>— Coûts Acquisition</td><td class="negative">— ${fmtEur(d.total_acquisition)}</td><td>${fmt(d.total_acquisition/d.ca_ht*100,1)}%</td></tr>
+    <tr><td>→ MC1</td><td class="positive">${fmtEur(d.mc1)}</td><td class="positive">${fmtPct(d.mc1_pct)}</td></tr>
+    <tr><td>— Coûts Sales</td><td class="negative">— ${fmtEur(d.total_sales)}</td><td>${fmt(d.total_sales/d.ca_ht*100,1)}%</td></tr>
+    <tr><td>→ MC2</td><td class="positive">${fmtEur(d.mc2)}</td><td class="positive">${fmtPct(d.mc2_pct)}</td></tr>
+    <tr><td>— Coûts Opérationnels</td><td class="negative">— ${fmtEur(d.total_ops)}</td><td>${fmt(d.total_ops/d.ca_ht*100,1)}%</td></tr>
+    <tr><td>→ Marge Brute</td><td class="${d.marge_brute>=0?'positive':'negative'}">${fmtEur(d.marge_brute)}</td><td class="${d.marge_brute>=0?'positive':'negative'}">${fmtPct(d.marge_brute_pct)}</td></tr>
+    <tr><td>— Frais de Structure</td><td class="negative">— ${fmtEur(d.total_structure)}</td><td>${fmt(d.total_structure/d.ca_ht*100,1)}%</td></tr>
+    <tr style="background:rgba(99,102,241,.1)"><td style="color:#a78bfa;font-weight:700">EBITDA</td><td class="${d.ebitda>=0?'positive':'negative'}" style="font-weight:700">${fmtEur(d.ebitda)}</td><td class="${d.ebitda>=0?'positive':'negative'}" style="font-weight:700">${fmtPct(d.ebitda_pct)}</td></tr>
+  </tbody></table>`;
+}
+
+function renderModalMC(d, step) {
+  const label  = step===1 ? 'MC1' : 'MC2';
+  const val    = step===1 ? d.mc1 : d.mc2;
+  const pct    = step===1 ? d.mc1_pct : d.mc2_pct;
+  const charge = step===1 ? d.total_acquisition : d.total_sales;
+  const pole   = step===1 ? 'Acquisition' : 'Sales & Closing';
+  document.getElementById('modal-body').innerHTML = `
+  <div class="modal-kpi-row">
+    ${kpiBlock(label, fmtEur(val))}
+    ${kpiBlock(`${label} %`, fmtPct(pct))}
+    ${kpiBlock(`Coûts ${pole}`, fmtEur(charge))}
+  </div>
+  <div class="modal-section">Détail dans le P&L</div>
+  <table class="detail-table"><thead><tr><th>Poste</th><th>Montant</th><th>% CA</th></tr></thead><tbody>
+    ${(state.pl||[]).filter(r=>r.pl_section===(step+1)&&!r.is_revenue).sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))
+      .map(r=>`<tr><td>${r.poste_budgetaire}</td><td class="negative">— ${fmtEur(Math.abs(r.amount))}</td><td>${fmt(Math.abs(r.amount)/d.ca_ht*100,1)}%</td></tr>`).join('')}
+    <tr><td>${label}</td><td class="${val>=0?'positive':'negative'}">${fmtEur(val)}</td><td class="${val>=0?'positive':'negative'}">${fmtPct(pct)}</td></tr>
+  </tbody></table>`;
+}
+
+function renderModalRoas(d) {
+  document.getElementById('modal-body').innerHTML = `
+  <div class="modal-kpi-row">
+    ${kpiBlock('ROAS Cash', d.roas_cash ? fmt(d.roas_cash,2)+'x' : '—')}
+    ${kpiBlock('CA Total', fmtEur(d.ca_ht))}
+    ${kpiBlock('Coûts Acquisition', fmtEur(d.total_acquisition))}
+  </div>
+  <div class="modal-section">Détail coûts acquisition</div>
+  <table class="detail-table"><thead><tr><th>Poste</th><th>Montant</th><th>% CA</th></tr></thead><tbody>
+    ${(state.pl||[]).filter(r=>r.pl_section===2&&!r.is_revenue).sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))
+      .map(r=>`<tr><td>${r.poste_budgetaire}</td><td class="negative">— ${fmtEur(Math.abs(r.amount))}</td><td>${fmt(Math.abs(r.amount)/d.ca_ht*100,1)}%</td></tr>`).join('')}
+    <tr><td>TOTAL ACQUISITION</td><td class="negative">${fmtEur(d.total_acquisition)}</td><td>${fmtPct(d.total_acquisition/d.ca_ht*100)}</td></tr>
+  </tbody></table>`;
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+function closeModalOutside(e) {
+  if (e.target === document.getElementById('modal')) closeModal();
+}
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
+
+// ── Init ─────────────────────────────────────────────────────
+document.getElementById('month-picker').value = state.month;
+fetchAll();
+</script>
+</body>
+</html>

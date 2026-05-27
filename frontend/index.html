@@ -595,7 +595,8 @@ function renderPL(plData, kpis) {
     for (const r of rows.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))) {
       const pct = fmt(Math.abs(r.amount)/ca*100, 1);
       const cls = r.is_revenue ? 'positive' : '';
-      html += `<tr class="pl-row" onclick="openPlLineModal(${JSON.stringify(r.poste_budgetaire)}, ${!!r.is_revenue})">
+      const posteAttr = JSON.stringify(r.poste_budgetaire).replace(/"/g, '&quot;');
+      html += `<tr class="pl-row" onclick="openPlLineModal(${posteAttr}, ${!!r.is_revenue})">
         <td>${r.poste_budgetaire}</td>
         <td class="${cls}">${r.is_revenue ? '' : '— '}${fmtEur(Math.abs(r.amount))}</td>
         <td>${pct}%</td>

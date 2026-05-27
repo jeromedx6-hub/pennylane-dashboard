@@ -164,40 +164,80 @@ def get_charges_breakdown(month: str = Query(default=None)):
     return {"month": month, "total": round(total, 2), "data": result}
 
 
+def _fill_months(year: str, by_month: dict, is_revenue=None) -> list:
+    """Retourne tous les mois de janvier au mois courant (ou déc si année passée)."""
+    today = date.today()
+    max_m = today.month if int(year) == today.year else 12
+    result, ytd = [], 0.0
+    for m in range(1, max_m + 1):
+        key = f"{year}-{m:02d}"
+        entry = by_month.get(key, {"amount": 0.0, "tx_count": 0})
+        ytd += entry["amount"]
+        result.append({
+            "month":      key,
+            "amount":     round(entry["amount"], 2),
+            "tx_count":   entry.get("tx_count", 0),
+            "ytd":        round(ytd, 2),
+            "is_revenue": is_revenue,
+        })
+    return result
+
+
 @app.get("/api/pl_line")
 def get_pl_line(poste: str = Query(...), year: str = Query(default=None)):
-    """Évolution mensuelle d'un poste P&L (mensuel + YTD cumulé)."""
+    """Évolution mensuelle d'un poste P&L (mensuel + YTD cumulé, tous les mois)."""
     year = year or str(date.today().year)
-    d_from = f"{year}-01-01"
-    d_to   = f"{year}-12-31"
+    d_from, d_to = f"{year}-01-01", f"{year}-12-31"
 
     rows = (
         sb.table("pl_daily")
         .select("date, amount, tx_count, is_revenue")
         .eq("poste_budgetaire", poste)
-        .gte("date", d_from)
-        .lte("date", d_to)
-        .execute()
-        .data
+        .gte("date", d_from).lte("date", d_to)
+        .execute().data
+    )
+
+    by_month: dict[str, dict] = {}
+    is_revenue_val = None
+    for r in rows:
+        m = r["date"][:7]
+        if m not in by_month:
+            by_month[m] = {"amount": 0.0, "tx_count": 0}
+            if is_revenue_val is None:
+                is_revenue_val = r.get("is_revenue")
+        by_month[m]["amount"]   += float(r["amount"] or 0)
+        by_month[m]["tx_count"] += int(r["tx_count"] or 0)
+
+    return {"poste": poste, "year": year, "data": _fill_months(year, by_month, is_revenue_val)}
+
+
+@app.get("/api/pl_section")
+def get_pl_section(
+    section: int  = Query(...),
+    year:    str  = Query(default=None),
+    revenue: bool = Query(default=False),
+):
+    """Évolution mensuelle du total d'une section P&L (charges ou revenus)."""
+    year = year or str(date.today().year)
+    d_from, d_to = f"{year}-01-01", f"{year}-12-31"
+
+    rows = (
+        sb.table("pl_daily")
+        .select("date, amount")
+        .eq("pl_section", section)
+        .eq("is_revenue", revenue)
+        .gte("date", d_from).lte("date", d_to)
+        .execute().data
     )
 
     by_month: dict[str, dict] = {}
     for r in rows:
         m = r["date"][:7]
         if m not in by_month:
-            by_month[m] = {"month": m, "amount": 0.0, "tx_count": 0, "is_revenue": r.get("is_revenue")}
-        by_month[m]["amount"]   += float(r["amount"] or 0)
-        by_month[m]["tx_count"] += int(r["tx_count"] or 0)
+            by_month[m] = {"amount": 0.0, "tx_count": 0}
+        by_month[m]["amount"] += float(r["amount"] or 0)
 
-    months_sorted = sorted(by_month.values(), key=lambda x: x["month"])
-
-    ytd = 0.0
-    for m in months_sorted:
-        ytd += m["amount"]
-        m["amount"] = round(m["amount"], 2)
-        m["ytd"]    = round(ytd, 2)
-
-    return {"poste": poste, "year": year, "data": months_sorted}
+    return {"section": section, "year": year, "data": _fill_months(year, by_month, revenue)}
 
 
 @app.get("/api/transactions")

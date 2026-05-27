@@ -604,11 +604,12 @@ function renderPL(plData, kpis) {
     }
 
     if (s > 1 && mcs[s] !== undefined) {
-      // Ligne total coûts de la section
+      // Ligne total coûts de la section — cliquable
       const TOTAL_LABELS = { 2:'Total Coûts Acquisition', 3:'Total Sales & Closing', 4:'Total Opérationnel', 5:'Total Structure' };
       const sectionTotal = rows.filter(r => !r.is_revenue).reduce((sum,r) => sum + Math.abs(r.amount), 0);
       if (sectionTotal > 0) {
-        html += `<tr class="subtotal">
+        const lbl = JSON.stringify(TOTAL_LABELS[s]).replace(/"/g,'&quot;');
+        html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(${s}, ${lbl}, false)">
           <td>${TOTAL_LABELS[s]}</td>
           <td class="negative">— ${fmtEur(sectionTotal)}</td>
           <td>${fmt(sectionTotal/ca*100,1)}%</td>
@@ -624,7 +625,9 @@ function renderPL(plData, kpis) {
         <td class="${cls}">${fmtPct(mcPcts[s])}</td>
       </tr>`;
     } else if (s === 1) {
-      html += `<tr class="subtotal"><td>TOTAL CA HT</td><td class="positive">${fmtEur(kpis.ca_ht)}</td><td>100%</td></tr>`;
+      html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(1, 'TOTAL CA HT', true)">
+        <td>TOTAL CA HT</td><td class="positive">${fmtEur(kpis.ca_ht)}</td><td>100%</td>
+      </tr>`;
     }
   }
 
@@ -834,42 +837,37 @@ function renderModalRoas(d) {
   </tbody></table>`;
 }
 
-// ── P&L Line Evolution Modal ─────────────────────────────────
+// ── P&L Evolution Modal (ligne individuelle ou total section) ─
 let chartPlLine = null;
 
-async function openPlLineModal(poste, isRevenue) {
+function _plModalSkeleton(title, year) {
   document.getElementById('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
-  document.getElementById('modal-title').textContent = poste + ' — Évolution mensuelle';
-  const year = state.month.slice(0, 4);
-  document.getElementById('modal-sub').textContent = `Année ${year} · Source : Pennylane`;
-  document.getElementById('modal-body').innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
-      <div class="modal-kpi-row" id="pl-line-kpis"></div>
-    </div>
+  document.getElementById('modal-title').textContent = title + ' — Évolution mensuelle';
+  document.getElementById('modal-sub').textContent   = `Année ${year} · Source : Pennylane`;
+  document.getElementById('modal-body').innerHTML    = `
+    <div class="modal-kpi-row" id="pl-line-kpis"></div>
     <canvas id="chart-pl-line" height="110"></canvas>
     <div id="pl-line-table"></div>`;
+}
 
-  const res  = await fetch(`${API}/api/pl_line?poste=${encodeURIComponent(poste)}&year=${year}`);
-  const json = await res.json();
-  const data = json.data || [];
-
+function _renderPlLineContent(data, isRevenue, year) {
   if (!data.length) {
-    document.getElementById('modal-body').innerHTML = '<p style="color:#475569;text-align:center;padding:30px">Aucune donnée pour cette période</p>';
+    document.getElementById('modal-body').innerHTML =
+      '<p style="color:#475569;text-align:center;padding:30px">Aucune donnée pour cette période</p>';
     return;
   }
 
-  // KPI summary row
-  const totalYtd = data[data.length - 1].ytd;
-  const moisAvecDonnees = data.filter(r => r.amount !== 0).length;
-  const moyMensuel = moisAvecDonnees ? totalYtd / moisAvecDonnees : 0;
-  const color = isRevenue ? '#4ade80' : '#f87171';
+  const color       = isRevenue ? '#4ade80' : '#f87171';
+  const totalYtd    = data[data.length - 1].ytd;
+  const activeMonths = data.filter(r => r.amount !== 0).length;
+  const moyMensuel  = activeMonths ? totalYtd / activeMonths : 0;
+
   document.getElementById('pl-line-kpis').innerHTML = `
     ${kpiBlock('YTD ' + year, `<span style="color:${color}">${isRevenue?'':'— '}${fmtEur(Math.abs(totalYtd))}</span>`)}
-    ${kpiBlock('Moy. mensuelle', fmtEur(Math.abs(moyMensuel)))}
-    ${kpiBlock('Mois actifs', moisAvecDonnees + ' / 12')}`;
+    ${kpiBlock('Moy. / mois actif', fmtEur(Math.abs(moyMensuel)))}
+    ${kpiBlock('Mois actifs', activeMonths + ' / ' + data.length)}`;
 
-  // Chart
   const labels  = data.map(r => monthLabel(r.month));
   const amounts = data.map(r => Math.abs(r.amount));
   const ytds    = data.map(r => Math.abs(r.ytd));
@@ -881,66 +879,62 @@ async function openPlLineModal(poste, isRevenue) {
     data: {
       labels,
       datasets: [
-        {
-          type: 'bar',
-          label: 'Mensuel',
-          data: amounts,
-          backgroundColor: color + '66',
-          borderColor: color,
-          borderWidth: 1,
-          borderRadius: 4,
-          yAxisID: 'y',
-        },
-        {
-          type: 'line',
-          label: 'YTD Cumulé',
-          data: ytds,
-          borderColor: '#6366f1',
-          backgroundColor: 'transparent',
-          borderWidth: 2,
-          pointBackgroundColor: '#6366f1',
-          pointRadius: 3,
-          tension: 0.3,
-          yAxisID: 'y2',
-        }
+        { type:'bar',  label:'Mensuel',    data:amounts, backgroundColor:color+'66', borderColor:color, borderWidth:1, borderRadius:4, yAxisID:'y' },
+        { type:'line', label:'YTD Cumulé', data:ytds,   borderColor:'#6366f1', backgroundColor:'transparent',
+          borderWidth:2, pointBackgroundColor:'#6366f1', pointRadius:3, tension:0.3, yAxisID:'y2' }
       ]
     },
     plugins: [ChartDataLabels],
     options: {
       responsive: true,
-      interaction: { mode: 'index', intersect: false },
+      interaction: { mode:'index', intersect:false },
       plugins: {
-        legend: { labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 12 } },
-        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmtEur(c.raw)}` } },
+        legend: { labels:{ color:'#94a3b8', font:{size:11}, boxWidth:12, padding:12 } },
+        tooltip: { callbacks:{ label: c => ` ${c.dataset.label}: ${fmtEur(c.raw)}` } },
         datalabels: {
-          display: ctx => ctx.datasetIndex === 0 && ctx.dataset.data[ctx.dataIndex] > 0,
-          color: '#94a3b8', font: { size: 9 },
-          anchor: 'end', align: 'top',
-          formatter: v => fmtShort(v) + '€',
+          display: c => c.datasetIndex === 0 && c.dataset.data[c.dataIndex] > 0,
+          color:'#94a3b8', font:{size:9}, anchor:'end', align:'top',
+          formatter: v => fmtShort(v)+'€',
         }
       },
       scales: {
-        x: { grid: { color: '#1e2235' }, ticks: { color: '#475569', font: { size: 10 } } },
-        y:  { position: 'left',  grid: { color: '#1e2235' }, ticks: { color: '#94a3b8', font: { size: 10 }, callback: v => fmtShort(v)+'€' } },
-        y2: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#6366f1', font: { size: 10 }, callback: v => fmtShort(v)+'€' } },
+        x:  { grid:{color:'#1e2235'}, ticks:{color:'#475569', font:{size:10}} },
+        y:  { position:'left',  grid:{color:'#1e2235'}, ticks:{color:'#94a3b8', font:{size:10}, callback: v=>fmtShort(v)+'€'} },
+        y2: { position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#6366f1', font:{size:10}, callback: v=>fmtShort(v)+'€'} },
       }
     }
   });
 
-  // Table
   let tHtml = `<div class="modal-section" style="margin-top:20px">Détail mensuel</div>
     <table class="detail-table">
       <thead><tr><th>Mois</th><th>Mensuel</th><th>YTD Cumulé</th></tr></thead><tbody>`;
   for (const r of data) {
-    const cls = isRevenue ? 'positive' : (r.amount !== 0 ? 'negative' : '');
+    const hasAmount = r.amount !== 0;
+    const cls = isRevenue ? 'positive' : (hasAmount ? 'negative' : '');
     tHtml += `<tr>
       <td>${monthLabel(r.month)}</td>
-      <td class="${cls}">${r.amount !== 0 ? (isRevenue?'':'— ') + fmtEur(Math.abs(r.amount)) : '—'}</td>
-      <td class="${cls}">${isRevenue?'':'— '}${fmtEur(Math.abs(r.ytd))}</td>
+      <td class="${cls}">${hasAmount ? (isRevenue?'':'— ')+fmtEur(Math.abs(r.amount)) : '<span style="color:#2d3148">—</span>'}</td>
+      <td class="${r.ytd!==0?(isRevenue?'positive':'negative'):''}">${r.ytd!==0?(isRevenue?'':'— ')+fmtEur(Math.abs(r.ytd)):'—'}</td>
     </tr>`;
   }
   tHtml += `</tbody></table>`;
   document.getElementById('pl-line-table').innerHTML = tHtml;
+}
+
+async function openPlLineModal(poste, isRevenue) {
+  const year = state.month.slice(0, 4);
+  _plModalSkeleton(poste, year);
+  const res  = await fetch(`${API}/api/pl_line?poste=${encodeURIComponent(poste)}&year=${year}`);
+  const json = await res.json();
+  _renderPlLineContent(json.data || [], isRevenue, year);
+}
+
+async function openPlSectionModal(section, label, revenue) {
+  const year = state.month.slice(0, 4);
+  _plModalSkeleton(label, year);
+  const res  = await fetch(`${API}/api/pl_section?section=${section}&year=${year}&revenue=${revenue}`);
+  const json = await res.json();
+  _renderPlLineContent(json.data || [], revenue, year);
 }
 
 function closeModal() {

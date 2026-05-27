@@ -905,57 +905,81 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
     }
   });
 
+  // ── Pré-grouper les transactions par mois ────────────────────
+  const byMonthTx = {};
+  if (transactions && transactions.length) {
+    for (const tx of transactions) {
+      const m = tx.date.slice(0,7);
+      if (!byMonthTx[m]) byMonthTx[m] = [];
+      byMonthTx[m].push(tx);
+    }
+  }
+  const hasTx = Object.keys(byMonthTx).length > 0;
+
   // ── Table mensuelle ──────────────────────────────────────────
   let tHtml = `<div class="modal-section" style="margin-top:20px">Récapitulatif mensuel</div>
     <table class="detail-table">
-      <thead><tr><th>Mois</th><th>Mensuel</th><th>YTD Cumulé</th></tr></thead><tbody>`;
+      <thead><tr>${hasTx?'<th style="width:22px"></th>':''}<th>Mois</th><th>Mensuel</th><th>YTD Cumulé</th></tr></thead><tbody>`;
+
   for (const r of data) {
-    const hasAmount = r.amount !== 0;
-    const cls = isRevenue ? 'positive' : (hasAmount ? 'negative' : '');
-    tHtml += `<tr>
-      <td>${monthLabel(r.month)}</td>
-      <td class="${cls}">${hasAmount ? (isRevenue?'':'— ')+fmtEur(Math.abs(r.amount)) : '<span style="color:#2d3148">—</span>'}</td>
-      <td class="${r.ytd!==0?(isRevenue?'positive':'negative'):''}">${r.ytd!==0?(isRevenue?'':'— ')+fmtEur(Math.abs(r.ytd)):'—'}</td>
-    </tr>`;
+    const hasAmount  = r.amount !== 0;
+    const cls        = isRevenue ? 'positive' : (hasAmount ? 'negative' : '');
+    const txsForMonth = byMonthTx[r.month] || [];
+    const txCount    = txsForMonth.length;
+
+    if (hasTx && txCount > 0) {
+      // Clickable row with expand arrow
+      const safeMonth = r.month; // format YYYY-MM, safe for id
+      tHtml += `<tr style="cursor:pointer" onclick="toggleMonthTx('${safeMonth}')">
+        <td style="color:#6366f1;font-size:11px;user-select:none" id="arrow-${safeMonth}">▶</td>
+        <td>${monthLabel(r.month)} <span style="color:#475569;font-size:10px">(${txCount} op.)</span></td>
+        <td class="${cls}">${hasAmount ? (isRevenue?'':'— ')+fmtEur(Math.abs(r.amount)) : '<span style="color:#2d3148">—</span>'}</td>
+        <td class="${r.ytd!==0?(isRevenue?'positive':'negative'):''}">${r.ytd!==0?(isRevenue?'':'— ')+fmtEur(Math.abs(r.ytd)):'—'}</td>
+      </tr>
+      <tr id="tx-detail-${safeMonth}" style="display:none">
+        <td colspan="4" style="padding:0 0 8px 0;background:transparent">
+          <table style="width:100%;border-collapse:collapse;background:#12141e;border:1px solid #2d3148;border-radius:0 0 6px 6px;margin-top:0">
+            <thead><tr>
+              <th style="padding:6px 10px;color:#475569;font-size:10px;font-weight:600;text-align:left;border-bottom:1px solid #2d3148;width:95px">Date</th>
+              <th style="padding:6px 10px;color:#475569;font-size:10px;font-weight:600;text-align:left;border-bottom:1px solid #2d3148">Libellé</th>
+              <th style="padding:6px 10px;color:#475569;font-size:10px;font-weight:600;text-align:right;border-bottom:1px solid #2d3148">Montant</th>
+            </tr></thead><tbody>`;
+      for (const tx of txsForMonth) {
+        const amt = Math.abs(parseFloat(tx.amount||0));
+        tHtml += `<tr>
+          <td style="padding:5px 10px;color:#475569;font-size:10px;border-bottom:1px solid #1a1d27">${tx.date}</td>
+          <td style="padding:5px 10px;color:#cbd5e1;font-size:11px;border-bottom:1px solid #1a1d27">${tx.label||'—'}</td>
+          <td style="padding:5px 10px;text-align:right;font-weight:500;font-size:11px;border-bottom:1px solid #1a1d27" class="${isRevenue?'positive':'negative'}">${isRevenue?'':'— '}${fmtEur(amt)}</td>
+        </tr>`;
+      }
+      tHtml += `</tbody></table></td></tr>`;
+
+    } else {
+      // Non-clickable row (no transactions for this month)
+      tHtml += `<tr>
+        ${hasTx ? '<td></td>' : ''}
+        <td>${monthLabel(r.month)}</td>
+        <td class="${cls}">${hasAmount ? (isRevenue?'':'— ')+fmtEur(Math.abs(r.amount)) : '<span style="color:#2d3148">—</span>'}</td>
+        <td class="${r.ytd!==0?(isRevenue?'positive':'negative'):''}">${r.ytd!==0?(isRevenue?'':'— ')+fmtEur(Math.abs(r.ytd)):'—'}</td>
+      </tr>`;
+    }
   }
   tHtml += `</tbody></table>`;
 
-  // ── Transactions sous-jacentes ───────────────────────────────
-  if (transactions && transactions.length) {
-    const byMonth = {};
-    for (const tx of transactions) {
-      const m = tx.date.slice(0,7);
-      if (!byMonth[m]) byMonth[m] = [];
-      byMonth[m].push(tx);
-    }
-    tHtml += `<div class="modal-section" style="margin-top:24px">
-      Opérations Pennylane
-      <span style="font-weight:400;color:#475569;margin-left:8px">${transactions.length} transaction${transactions.length>1?'s':''}</span>
-    </div>`;
-    for (const [month, txs] of Object.entries(byMonth).sort()) {
-      const mTotal = txs.reduce((s,t) => s + Math.abs(parseFloat(t.amount||0)), 0);
-      tHtml += `
-      <div style="background:#12141e;padding:7px 12px;border-radius:6px 6px 0 0;border:1px solid #2d3148;margin-top:10px;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">${monthLabel(month)}</span>
-        <span style="font-size:12px;font-weight:700;color:${isRevenue?'#4ade80':'#f87171'}">${isRevenue?'':'— '}${fmtEur(mTotal)}</span>
-      </div>
-      <table class="detail-table" style="border:1px solid #2d3148;border-top:none;border-radius:0 0 6px 6px;margin-bottom:0">
-        <thead><tr><th style="width:95px">Date</th><th style="text-align:left">Libellé</th><th>Montant</th></tr></thead><tbody>`;
-      for (const tx of txs) {
-        const amt = Math.abs(parseFloat(tx.amount||0));
-        tHtml += `<tr>
-          <td style="color:#475569;font-size:10px">${tx.date}</td>
-          <td style="text-align:left;color:#cbd5e1">${tx.label||'—'}</td>
-          <td class="${isRevenue?'positive':'negative'}" style="font-weight:500">${isRevenue?'':'— '}${fmtEur(amt)}</td>
-        </tr>`;
-      }
-      tHtml += `</tbody></table>`;
-    }
-  } else if (transactions !== undefined) {
+  if (transactions !== undefined && !hasTx) {
     tHtml += `<p style="color:#2d3148;font-size:12px;text-align:center;padding:16px 0">Aucune transaction Pennylane directe trouvée pour ce poste</p>`;
   }
 
   document.getElementById('pl-line-table').innerHTML = tHtml;
+}
+
+function toggleMonthTx(month) {
+  const detail = document.getElementById('tx-detail-' + month);
+  const arrow  = document.getElementById('arrow-' + month);
+  if (!detail) return;
+  const open = detail.style.display === 'none';
+  detail.style.display = open ? '' : 'none';
+  if (arrow) arrow.textContent = open ? '▼' : '▶';
 }
 
 async function openPlLineModal(poste, isRevenue) {

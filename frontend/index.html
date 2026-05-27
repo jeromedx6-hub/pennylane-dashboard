@@ -80,6 +80,10 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 .pl-table tr.subtotal td { border-top:1px solid #2d3148; border-bottom:2px solid #2d3148; font-weight:700; color:#fff; padding:9px 10px; }
 .pl-table tr.mc-row td { color:#6366f1; font-weight:600; background:rgba(99,102,241,.04); }
 .pl-table tr.ebitda-row td { background:rgba(99,102,241,.1); color:#a78bfa; font-weight:700; font-size:13px; border-top:2px solid #6366f1; }
+.pl-table tr.pl-row { cursor:pointer; transition:background .12s; }
+.pl-table tr.pl-row:hover td { background:rgba(99,102,241,.08); }
+.pl-table tr.pl-row td:first-child::after { content:' ↗'; font-size:9px; color:#475569; opacity:0; transition:opacity .12s; }
+.pl-table tr.pl-row:hover td:first-child::after { opacity:1; }
 .positive { color:#4ade80 !important; }
 .negative { color:#f87171 !important; }
 .warn-text { color:#fb923c !important; }
@@ -591,7 +595,7 @@ function renderPL(plData, kpis) {
     for (const r of rows.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))) {
       const pct = fmt(Math.abs(r.amount)/ca*100, 1);
       const cls = r.is_revenue ? 'positive' : '';
-      html += `<tr>
+      html += `<tr class="pl-row" onclick="openPlLineModal(${JSON.stringify(r.poste_budgetaire)}, ${!!r.is_revenue})">
         <td>${r.poste_budgetaire}</td>
         <td class="${cls}">${r.is_revenue ? '' : '— '}${fmtEur(Math.abs(r.amount))}</td>
         <td>${pct}%</td>
@@ -829,9 +833,119 @@ function renderModalRoas(d) {
   </tbody></table>`;
 }
 
+// ── P&L Line Evolution Modal ─────────────────────────────────
+let chartPlLine = null;
+
+async function openPlLineModal(poste, isRevenue) {
+  document.getElementById('modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  document.getElementById('modal-title').textContent = poste + ' — Évolution mensuelle';
+  const year = state.month.slice(0, 4);
+  document.getElementById('modal-sub').textContent = `Année ${year} · Source : Pennylane`;
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+      <div class="modal-kpi-row" id="pl-line-kpis"></div>
+    </div>
+    <canvas id="chart-pl-line" height="110"></canvas>
+    <div id="pl-line-table"></div>`;
+
+  const res  = await fetch(`${API}/api/pl_line?poste=${encodeURIComponent(poste)}&year=${year}`);
+  const json = await res.json();
+  const data = json.data || [];
+
+  if (!data.length) {
+    document.getElementById('modal-body').innerHTML = '<p style="color:#475569;text-align:center;padding:30px">Aucune donnée pour cette période</p>';
+    return;
+  }
+
+  // KPI summary row
+  const totalYtd = data[data.length - 1].ytd;
+  const moisAvecDonnees = data.filter(r => r.amount !== 0).length;
+  const moyMensuel = moisAvecDonnees ? totalYtd / moisAvecDonnees : 0;
+  const color = isRevenue ? '#4ade80' : '#f87171';
+  document.getElementById('pl-line-kpis').innerHTML = `
+    ${kpiBlock('YTD ' + year, `<span style="color:${color}">${isRevenue?'':'— '}${fmtEur(Math.abs(totalYtd))}</span>`)}
+    ${kpiBlock('Moy. mensuelle', fmtEur(Math.abs(moyMensuel)))}
+    ${kpiBlock('Mois actifs', moisAvecDonnees + ' / 12')}`;
+
+  // Chart
+  const labels  = data.map(r => monthLabel(r.month));
+  const amounts = data.map(r => Math.abs(r.amount));
+  const ytds    = data.map(r => Math.abs(r.ytd));
+
+  const ctx = document.getElementById('chart-pl-line').getContext('2d');
+  if (chartPlLine) { chartPlLine.destroy(); chartPlLine = null; }
+
+  chartPlLine = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Mensuel',
+          data: amounts,
+          backgroundColor: color + '66',
+          borderColor: color,
+          borderWidth: 1,
+          borderRadius: 4,
+          yAxisID: 'y',
+        },
+        {
+          type: 'line',
+          label: 'YTD Cumulé',
+          data: ytds,
+          borderColor: '#6366f1',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointBackgroundColor: '#6366f1',
+          pointRadius: 3,
+          tension: 0.3,
+          yAxisID: 'y2',
+        }
+      ]
+    },
+    plugins: [ChartDataLabels],
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 12 } },
+        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmtEur(c.raw)}` } },
+        datalabels: {
+          display: ctx => ctx.datasetIndex === 0 && ctx.dataset.data[ctx.dataIndex] > 0,
+          color: '#94a3b8', font: { size: 9 },
+          anchor: 'end', align: 'top',
+          formatter: v => fmtShort(v) + '€',
+        }
+      },
+      scales: {
+        x: { grid: { color: '#1e2235' }, ticks: { color: '#475569', font: { size: 10 } } },
+        y:  { position: 'left',  grid: { color: '#1e2235' }, ticks: { color: '#94a3b8', font: { size: 10 }, callback: v => fmtShort(v)+'€' } },
+        y2: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#6366f1', font: { size: 10 }, callback: v => fmtShort(v)+'€' } },
+      }
+    }
+  });
+
+  // Table
+  let tHtml = `<div class="modal-section" style="margin-top:20px">Détail mensuel</div>
+    <table class="detail-table">
+      <thead><tr><th>Mois</th><th>Mensuel</th><th>YTD Cumulé</th></tr></thead><tbody>`;
+  for (const r of data) {
+    const cls = isRevenue ? 'positive' : (r.amount !== 0 ? 'negative' : '');
+    tHtml += `<tr>
+      <td>${monthLabel(r.month)}</td>
+      <td class="${cls}">${r.amount !== 0 ? (isRevenue?'':'— ') + fmtEur(Math.abs(r.amount)) : '—'}</td>
+      <td class="${cls}">${isRevenue?'':'— '}${fmtEur(Math.abs(r.ytd))}</td>
+    </tr>`;
+  }
+  tHtml += `</tbody></table>`;
+  document.getElementById('pl-line-table').innerHTML = tHtml;
+}
+
 function closeModal() {
   document.getElementById('modal').classList.remove('open');
   document.body.style.overflow = '';
+  if (chartPlLine) { chartPlLine.destroy(); chartPlLine = null; }
 }
 function closeModalOutside(e) {
   if (e.target === document.getElementById('modal')) closeModal();

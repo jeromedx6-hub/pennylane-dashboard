@@ -164,6 +164,42 @@ def get_charges_breakdown(month: str = Query(default=None)):
     return {"month": month, "total": round(total, 2), "data": result}
 
 
+@app.get("/api/pl_line")
+def get_pl_line(poste: str = Query(...), year: str = Query(default=None)):
+    """Évolution mensuelle d'un poste P&L (mensuel + YTD cumulé)."""
+    year = year or str(date.today().year)
+    d_from = f"{year}-01-01"
+    d_to   = f"{year}-12-31"
+
+    rows = (
+        sb.table("pl_daily")
+        .select("date, amount, tx_count, is_revenue")
+        .eq("poste_budgetaire", poste)
+        .gte("date", d_from)
+        .lte("date", d_to)
+        .execute()
+        .data
+    )
+
+    by_month: dict[str, dict] = {}
+    for r in rows:
+        m = r["date"][:7]
+        if m not in by_month:
+            by_month[m] = {"month": m, "amount": 0.0, "tx_count": 0, "is_revenue": r.get("is_revenue")}
+        by_month[m]["amount"]   += float(r["amount"] or 0)
+        by_month[m]["tx_count"] += int(r["tx_count"] or 0)
+
+    months_sorted = sorted(by_month.values(), key=lambda x: x["month"])
+
+    ytd = 0.0
+    for m in months_sorted:
+        ytd += m["amount"]
+        m["amount"] = round(m["amount"], 2)
+        m["ytd"]    = round(ytd, 2)
+
+    return {"poste": poste, "year": year, "data": months_sorted}
+
+
 @app.get("/api/transactions")
 def get_transactions(
     category: str = Query(default=None),

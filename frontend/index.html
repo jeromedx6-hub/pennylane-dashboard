@@ -851,7 +851,7 @@ function _plModalSkeleton(title, year) {
     <div id="pl-line-table"></div>`;
 }
 
-function _renderPlLineContent(data, isRevenue, year) {
+function _renderPlLineContent(data, isRevenue, year, transactions) {
   if (!data.length) {
     document.getElementById('modal-body').innerHTML =
       '<p style="color:#475569;text-align:center;padding:30px">Aucune donnée pour cette période</p>';
@@ -905,7 +905,8 @@ function _renderPlLineContent(data, isRevenue, year) {
     }
   });
 
-  let tHtml = `<div class="modal-section" style="margin-top:20px">Détail mensuel</div>
+  // ── Table mensuelle ──────────────────────────────────────────
+  let tHtml = `<div class="modal-section" style="margin-top:20px">Récapitulatif mensuel</div>
     <table class="detail-table">
       <thead><tr><th>Mois</th><th>Mensuel</th><th>YTD Cumulé</th></tr></thead><tbody>`;
   for (const r of data) {
@@ -918,15 +919,54 @@ function _renderPlLineContent(data, isRevenue, year) {
     </tr>`;
   }
   tHtml += `</tbody></table>`;
+
+  // ── Transactions sous-jacentes ───────────────────────────────
+  if (transactions && transactions.length) {
+    const byMonth = {};
+    for (const tx of transactions) {
+      const m = tx.date.slice(0,7);
+      if (!byMonth[m]) byMonth[m] = [];
+      byMonth[m].push(tx);
+    }
+    tHtml += `<div class="modal-section" style="margin-top:24px">
+      Opérations Pennylane
+      <span style="font-weight:400;color:#475569;margin-left:8px">${transactions.length} transaction${transactions.length>1?'s':''}</span>
+    </div>`;
+    for (const [month, txs] of Object.entries(byMonth).sort()) {
+      const mTotal = txs.reduce((s,t) => s + Math.abs(parseFloat(t.amount||0)), 0);
+      tHtml += `
+      <div style="background:#12141e;padding:7px 12px;border-radius:6px 6px 0 0;border:1px solid #2d3148;margin-top:10px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">${monthLabel(month)}</span>
+        <span style="font-size:12px;font-weight:700;color:${isRevenue?'#4ade80':'#f87171'}">${isRevenue?'':'— '}${fmtEur(mTotal)}</span>
+      </div>
+      <table class="detail-table" style="border:1px solid #2d3148;border-top:none;border-radius:0 0 6px 6px;margin-bottom:0">
+        <thead><tr><th style="width:95px">Date</th><th style="text-align:left">Libellé</th><th>Montant</th></tr></thead><tbody>`;
+      for (const tx of txs) {
+        const amt = Math.abs(parseFloat(tx.amount||0));
+        tHtml += `<tr>
+          <td style="color:#475569;font-size:10px">${tx.date}</td>
+          <td style="text-align:left;color:#cbd5e1">${tx.label||'—'}</td>
+          <td class="${isRevenue?'positive':'negative'}" style="font-weight:500">${isRevenue?'':'— '}${fmtEur(amt)}</td>
+        </tr>`;
+      }
+      tHtml += `</tbody></table>`;
+    }
+  } else if (transactions !== undefined) {
+    tHtml += `<p style="color:#2d3148;font-size:12px;text-align:center;padding:16px 0">Aucune transaction Pennylane directe trouvée pour ce poste</p>`;
+  }
+
   document.getElementById('pl-line-table').innerHTML = tHtml;
 }
 
 async function openPlLineModal(poste, isRevenue) {
   const year = state.month.slice(0, 4);
   _plModalSkeleton(poste, year);
-  const res  = await fetch(`${API}/api/pl_line?poste=${encodeURIComponent(poste)}&year=${year}`);
-  const json = await res.json();
-  _renderPlLineContent(json.data || [], isRevenue, year);
+  const enc = encodeURIComponent(poste);
+  const [lineJson, txJson] = await Promise.all([
+    fetch(`${API}/api/pl_line?poste=${enc}&year=${year}`).then(r=>r.json()),
+    fetch(`${API}/api/pl_line_transactions?poste=${enc}&year=${year}`).then(r=>r.json()),
+  ]);
+  _renderPlLineContent(lineJson.data || [], isRevenue, year, txJson.data || []);
 }
 
 async function openPlSectionModal(section, label, revenue) {

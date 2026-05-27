@@ -211,6 +211,35 @@ def get_pl_line(poste: str = Query(...), year: str = Query(default=None)):
     return {"poste": poste, "year": year, "data": _fill_months(year, by_month, is_revenue_val)}
 
 
+@app.get("/api/pl_line_transactions")
+def get_pl_line_transactions(poste: str = Query(...), year: str = Query(default=None)):
+    """Liste des transactions Pennylane sous-jacentes à un poste P&L."""
+    year = year or str(date.today().year)
+    d_from, d_to = f"{year}-01-01", f"{year}-12-31"
+
+    # Trouver les catégories Pennylane correspondant à ce poste
+    mapping = (
+        sb.table("category_mapping")
+        .select("pennylane_category_name")
+        .eq("poste_budgetaire", poste)
+        .execute().data
+    )
+    if not mapping:
+        return {"poste": poste, "year": year, "data": []}
+
+    cat_names = [r["pennylane_category_name"] for r in mapping]
+
+    rows = (
+        sb.table("transactions")
+        .select("date, label, amount, direction, account_name, category_name")
+        .in_("category_name", cat_names)
+        .gte("date", d_from).lte("date", d_to)
+        .order("date", desc=False)
+        .execute().data
+    )
+    return {"poste": poste, "year": year, "data": rows}
+
+
 @app.get("/api/pl_section")
 def get_pl_section(
     section: int  = Query(...),

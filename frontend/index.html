@@ -920,8 +920,20 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
   window._currentTxByMonth = byMonthTx;
   window._currentPlLabel   = document.getElementById('modal-title')?.textContent?.replace(' — Évolution mensuelle','') || 'export';
 
+  const totalTxCount = transactions ? transactions.length : 0;
+
   // ── Table mensuelle ──────────────────────────────────────────
-  let tHtml = `<div class="modal-section" style="margin-top:20px">Récapitulatif mensuel</div>
+  let tHtml = `
+    <div class="modal-section" style="margin-top:20px;display:flex;align-items:center;justify-content:space-between">
+      <span>Récapitulatif mensuel</span>
+      ${hasTx ? `<button onclick="downloadAllTx()"
+        style="display:flex;align-items:center;gap:5px;background:#1a1d27;border:1px solid #2d3148;border-radius:6px;padding:4px 11px;color:#94a3b8;font-size:10px;cursor:pointer;transition:all .15s;font-weight:500"
+        onmouseover="this.style.borderColor='#6366f1';this.style.color='#6366f1'"
+        onmouseout="this.style.borderColor='#2d3148';this.style.color='#94a3b8'">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12l-5-5h3V2h4v5h3l-5 5zm-6 2h12v1.5H2V14z"/></svg>
+        Exporter (${totalTxCount} op.)
+      </button>` : ''}
+    </div>
     <table class="detail-table">
       <thead><tr>${hasTx?'<th style="width:22px"></th>':''}<th>Mois</th><th>Mensuel</th><th>YTD Cumulé</th></tr></thead><tbody>`;
 
@@ -942,15 +954,6 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
       </tr>
       <tr id="tx-detail-${safeMonth}" style="display:none">
         <td colspan="4" style="padding:0 0 8px 0;background:transparent">
-          <div style="display:flex;justify-content:flex-end;padding:4px 0 4px 0">
-            <button onclick="event.stopPropagation();downloadMonthTx('${safeMonth}')"
-              style="display:flex;align-items:center;gap:5px;background:#1a1d27;border:1px solid #2d3148;border-radius:6px;padding:4px 10px;color:#94a3b8;font-size:10px;cursor:pointer;transition:all .15s"
-              onmouseover="this.style.borderColor='#6366f1';this.style.color='#6366f1'"
-              onmouseout="this.style.borderColor='#2d3148';this.style.color='#94a3b8'">
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12l-5-5h3V2h4v5h3l-5 5zm-6 2h12v1.5H2V14z"/></svg>
-              Télécharger Excel
-            </button>
-          </div>
           <table style="width:100%;border-collapse:collapse;background:#12141e;border:1px solid #2d3148;border-radius:0 0 6px 6px;margin-top:0">
             <thead><tr>
               <th style="padding:6px 10px;color:#475569;font-size:10px;font-weight:600;text-align:left;border-bottom:1px solid #2d3148;width:95px">Date</th>
@@ -995,12 +998,8 @@ function toggleMonthTx(month) {
   if (arrow) arrow.textContent = open ? '▼' : '▶';
 }
 
-function downloadMonthTx(month) {
-  const txs   = (window._currentTxByMonth || {})[month] || [];
-  const label = (window._currentPlLabel || 'export').replace(/[^a-zA-Z0-9_\-]/g, '_');
+function _buildAndDownloadCsv(txs, filename) {
   if (!txs.length) return;
-
-  // BOM UTF-8 pour Excel + séparateur point-virgule (standard FR)
   const BOM  = '﻿';
   const rows = [['Date', 'Libellé', 'Montant (€)', 'Compte', 'Catégorie']];
   for (const tx of txs) {
@@ -1013,17 +1012,27 @@ function downloadMonthTx(month) {
       (tx.category_name || '').replace(/"/g, '""'),
     ]);
   }
-
-  const csv = BOM + rows.map(r => r.map(v => `"${v}"`).join(';')).join('\r\n');
+  const csv  = BOM + rows.map(r => r.map(v => `"${v}"`).join(';')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  a.href     = url;
-  a.download = `${label}_${month}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function downloadMonthTx(month) {
+  const txs   = (window._currentTxByMonth || {})[month] || [];
+  const label = (window._currentPlLabel || 'export').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  _buildAndDownloadCsv(txs, `${label}_${month}.csv`);
+}
+
+function downloadAllTx() {
+  const byMonth = window._currentTxByMonth || {};
+  const allTxs  = Object.values(byMonth).flat().sort((a,b) => a.date.localeCompare(b.date));
+  const label   = (window._currentPlLabel || 'export').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const year    = allTxs.length ? allTxs[0].date.slice(0,4) : new Date().getFullYear();
+  _buildAndDownloadCsv(allTxs, `${label}_${year}.csv`);
 }
 
 async function openPlLineModal(poste, isRevenue) {

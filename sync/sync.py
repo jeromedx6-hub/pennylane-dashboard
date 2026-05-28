@@ -152,6 +152,51 @@ def compute_kpis(sb, target_date):
     log.info(f"  kpis : CA={ca:.0f}€  EBITDA={ebitda:.0f}€ ({pct(ebitda,ca)}%)  — {date_str}")
 
 
+# ── Customer invoices ─────────────────────────────────────────────────────
+
+def sync_customer_invoices(token, sb, date_from, date_to):
+    """Sync factures clients Pennylane → customer_invoices_sync (nouveaux vs récurrents)."""
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params  = {"per_page": 100, "date_gte": date_from.isoformat(), "date_lte": date_to.isoformat()}
+
+    log.info("Récupération customer_invoices Pennylane…")
+    invoices = []
+    while True:
+        r = requests.get(f"{BASE_URL}/customer_invoices", headers=headers, params=params)
+        r.raise_for_status()
+        data = r.json()
+        invoices.extend(data.get("items", []))
+        if not data.get("has_more"):
+            break
+        params["cursor"] = data["next_cursor"]
+        time.sleep(0.26)
+
+    log.info(f"  {len(invoices)} customer_invoices récupérées")
+    if not invoices:
+        return
+
+    rows = []
+    for inv in invoices:
+        customer = inv.get("customer") or inv.get("third_party") or {}
+        cid = str(customer.get("id", "")).strip()
+        if not cid or cid == "None":
+            continue
+        amount = float(inv.get("amount") or inv.get("currency_amount") or 0)
+        rows.append({
+            "id":            f"ci_{inv['id']}",
+            "customer_id":   cid,
+            "customer_name": customer.get("name", ""),
+            "date":          inv.get("date", ""),
+            "amount":        abs(amount),
+            "status":        inv.get("status", ""),
+            "currency":      inv.get("currency", "EUR"),
+        })
+
+    if rows:
+        sb.table("customer_invoices_sync").upsert(rows, on_conflict="id").execute()
+        log.info(f"  {len(rows)} customer_invoices upsertées")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────
 
 def run(date_from=None, date_to=None):
@@ -179,6 +224,8 @@ def run(date_from=None, date_to=None):
         compute_pl_daily(sb, mapping, current)
         compute_kpis(sb, current)
         current += timedelta(days=1)
+
+    sync_customer_invoices(PENNYLANE_TOKEN, sb, date_from, date_to)
 
     log.info("✅ Sync terminé.")
 

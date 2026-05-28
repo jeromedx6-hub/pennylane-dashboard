@@ -95,6 +95,20 @@ SELECT
 FROM pl_daily
 GROUP BY 1,2,3,4,5,6;
 
+-- ── Customer invoices (nouveaux vs récurrents) ────────────────
+CREATE TABLE IF NOT EXISTS customer_invoices_sync (
+    id            TEXT PRIMARY KEY,
+    customer_id   TEXT NOT NULL,
+    customer_name TEXT,
+    date          DATE NOT NULL,
+    amount        DECIMAL(12,2),
+    status        TEXT,
+    currency      TEXT DEFAULT 'EUR',
+    synced_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ci_customer ON customer_invoices_sync(customer_id);
+CREATE INDEX IF NOT EXISTS idx_ci_date     ON customer_invoices_sync(date);
+
 CREATE OR REPLACE VIEW kpis_monthly AS
 SELECT
     DATE_TRUNC('month', date)::DATE         AS month,

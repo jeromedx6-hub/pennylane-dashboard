@@ -150,13 +150,8 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <div class="sidebar">
   <div class="logo"><div class="logo-icon">📊</div> FinBoard</div>
   <div class="nav-label">Analyse</div>
-  <div class="nav-item active">⬡ &nbsp;Indicateurs</div>
-  <div class="nav-item">≡ &nbsp;P&L Analytique</div>
-  <div class="nav-item">◎ &nbsp;Acquisition</div>
-  <div class="nav-item">◈ &nbsp;Sales & Closing</div>
-  <div class="nav-label">Opérationnel</div>
-  <div class="nav-item">◷ &nbsp;Trésorerie</div>
-  <div class="nav-item">⊞ &nbsp;Charges détail</div>
+  <div class="nav-item active" onclick="showPage('indicateurs', this)">⬡ &nbsp;Indicateurs</div>
+  <div class="nav-item" onclick="showPage('kpi', this)">◈ &nbsp;KPI Clients</div>
   <div class="sidebar-bottom">
     <div class="client-badge">
       <strong id="client-name">Dashboard Financier</strong>
@@ -167,6 +162,9 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 
 <!-- ════ MAIN ════════════════════════════════════════════════ -->
 <div class="main">
+
+<!-- ════ PAGE : INDICATEURS ════════════════════════════════ -->
+<div id="page-indicateurs" class="page">
 
   <!-- Header -->
   <div class="page-header">
@@ -256,6 +254,56 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     <div id="ca-bars"></div>
     <div id="ratios-sub"></div>
   </div>
+
+</div><!-- /page-indicateurs -->
+
+<!-- ════ PAGE : KPI CLIENTS ════════════════════════════════ -->
+<div id="page-kpi" class="page" style="display:none">
+
+  <!-- Header -->
+  <div class="page-header">
+    <div>
+      <div class="page-title">KPI <span>Clients</span></div>
+      <div class="header-sub">Nouveaux vs récurrents · Source Pennylane</div>
+    </div>
+    <div class="header-right" style="flex-wrap:wrap;gap:8px">
+      <div class="date-selector" id="kpi-period-btns">
+        <button class="date-btn active" onclick="setKpiPeriod('day',this)">Jour</button>
+        <button class="date-btn" onclick="setKpiPeriod('week',this)">Semaine</button>
+        <button class="date-btn" onclick="setKpiPeriod('month',this)">Mois</button>
+        <button class="date-btn" onclick="setKpiPeriod('custom',this)">Personnalisé</button>
+      </div>
+      <div id="kpi-custom-range" style="display:none;align-items:center;gap:6px">
+        <input type="date" id="kpi-date-from" onchange="fetchKpiData()"
+          style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:6px 10px;color:#e2e8f0;font-size:12px">
+        <span style="color:#475569;font-size:12px">→</span>
+        <input type="date" id="kpi-date-to" onchange="fetchKpiData()"
+          style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:6px 10px;color:#e2e8f0;font-size:12px">
+      </div>
+      <div class="sync-badge"><span id="kpi-period-label">Ce mois</span></div>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid" id="kpi-clients-grid">
+    <div class="kpi-card green"><div class="kpi-label">Nouveaux Clients</div><div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card blue"><div class="kpi-label">CA Nouveaux Clients</div><div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card purple"><div class="kpi-label">CA Clients Récurrents</div><div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card orange"><div class="kpi-label">CA Total Période</div><div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+  </div>
+
+  <!-- Répartition -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Répartition CA — Nouveaux vs Récurrents</div>
+        <div class="card-sub" id="kpi-split-label">Chargement…</div>
+      </div>
+    </div>
+    <div id="kpi-split-bar"><div style="color:#475569;text-align:center;padding:30px">Chargement…</div></div>
+  </div>
+
+</div><!-- /page-kpi -->
 
 </div><!-- /main -->
 
@@ -1097,6 +1145,153 @@ function closeModalOutside(e) {
   if (e.target === document.getElementById('modal')) closeModal();
 }
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
+
+// ── Navigation pages ─────────────────────────────────────────
+function showPage(page, el) {
+  document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+  document.getElementById('page-' + page).style.display = '';
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
+  if (page === 'kpi' && !kpiState.date_from) initKpiPage();
+}
+
+// ── KPI Clients ───────────────────────────────────────────────
+let kpiPeriodMode = 'month';
+let kpiState = { date_from: null, date_to: null, data: null };
+
+function initKpiPage() {
+  const btn = document.querySelector('#kpi-period-btns .date-btn');
+  setKpiPeriod('month', btn);
+}
+
+function setKpiPeriod(mode, btn) {
+  kpiPeriodMode = mode;
+  document.querySelectorAll('#kpi-period-btns .date-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  const cr = document.getElementById('kpi-custom-range');
+  if (mode === 'custom') { cr.style.display = 'flex'; return; }
+  cr.style.display = 'none';
+
+  const today = new Date();
+  const f     = d => d.toISOString().slice(0, 10);
+  let dFrom, dTo = f(today), lbl;
+
+  if (mode === 'day') {
+    dFrom = f(today);
+    lbl   = "Aujourd'hui — " + today.toLocaleDateString('fr-FR', {day:'numeric',month:'long'});
+  } else if (mode === 'week') {
+    const d = new Date(today);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // lundi
+    dFrom = f(d);
+    lbl   = 'Semaine du ' + d.toLocaleDateString('fr-FR', {day:'numeric',month:'short'});
+  } else {
+    dFrom = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
+    lbl   = new Date(today.getFullYear(), today.getMonth(), 1)
+              .toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+    lbl   = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+  }
+
+  document.getElementById('kpi-period-label').textContent = lbl;
+  document.getElementById('kpi-split-label').textContent  = lbl;
+  kpiState.date_from = dFrom;
+  kpiState.date_to   = dTo;
+  fetchKpiData();
+}
+
+async function fetchKpiData() {
+  if (kpiPeriodMode === 'custom') {
+    const from = document.getElementById('kpi-date-from').value;
+    const to   = document.getElementById('kpi-date-to').value;
+    if (!from || !to) return;
+    kpiState.date_from = from;
+    kpiState.date_to   = to;
+    const lbl = `${from} → ${to}`;
+    document.getElementById('kpi-period-label').textContent = lbl;
+    document.getElementById('kpi-split-label').textContent  = lbl;
+  }
+  if (!kpiState.date_from || !kpiState.date_to) return;
+
+  try {
+    const res  = await fetch(`${API}/api/customers_kpis?date_from=${kpiState.date_from}&date_to=${kpiState.date_to}`);
+    const json = await res.json();
+    kpiState.data = json.data;
+    renderKpiPage();
+  } catch(e) {
+    console.error('KPI clients error', e);
+  }
+}
+
+function renderKpiPage() {
+  const d    = kpiState.data;
+  const grid = document.getElementById('kpi-clients-grid');
+  const bar  = document.getElementById('kpi-split-bar');
+
+  if (!d) {
+    grid.innerHTML = `<div style="color:#475569;padding:40px;text-align:center;grid-column:1/-1;font-size:13px;line-height:1.8">
+      Aucune donnée · Lancez un backfill historique :<br>
+      <code style="color:#6366f1;font-size:12px;background:#12141e;padding:4px 10px;border-radius:6px;display:inline-block;margin-top:8px">
+        python sync/sync.py 2024-01-01 ${new Date().toISOString().slice(0,10)}
+      </code>
+    </div>`;
+    if (bar) bar.innerHTML = '';
+    return;
+  }
+
+  // Cards
+  grid.innerHTML = `
+    <div class="kpi-card green">
+      <div class="kpi-label">Nouveaux Clients</div>
+      <div class="kpi-value">${d.new_clients_count}<sup style="font-size:13px;color:#94a3b8;font-weight:400"> cl.</sup></div>
+      <div class="kpi-deltas"><span class="delta up">▲ ${fmt(d.pct_new,1)}% du CA</span></div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">CA Nouveaux Clients</div>
+      <div class="kpi-value">${fmtEur(d.ca_new)}</div>
+      <div class="kpi-deltas"><span class="delta">${fmt(d.pct_new,1)}%<span class="tag">du total</span></span></div>
+    </div>
+    <div class="kpi-card purple">
+      <div class="kpi-label">CA Clients Récurrents</div>
+      <div class="kpi-value">${fmtEur(d.ca_recurring)}</div>
+      <div class="kpi-deltas"><span class="delta">${fmt(d.pct_recurring,1)}%<span class="tag">du total</span></span></div>
+    </div>
+    <div class="kpi-card orange">
+      <div class="kpi-label">CA Total Période</div>
+      <div class="kpi-value">${fmtEur(d.ca_total)}</div>
+      <div class="kpi-deltas"></div>
+    </div>`;
+
+  // Barre de répartition + détails
+  if (bar) bar.innerHTML = `
+    <div class="prog-wrap" style="margin-bottom:20px">
+      <div class="prog-header" style="margin-bottom:8px">
+        <span style="display:flex;align-items:center;gap:7px">
+          <span style="width:10px;height:10px;background:#4ade80;border-radius:2px;display:inline-block"></span>
+          Nouveaux — ${fmtEur(d.ca_new)} · ${fmt(d.pct_new,1)}%
+        </span>
+        <span style="display:flex;align-items:center;gap:7px">
+          Récurrents — ${fmtEur(d.ca_recurring)} · ${fmt(d.pct_recurring,1)}%
+          <span style="width:10px;height:10px;background:#a78bfa;border-radius:2px;display:inline-block"></span>
+        </span>
+      </div>
+      <div style="height:22px;background:#252840;border-radius:11px;overflow:hidden;display:flex">
+        <div style="width:${d.pct_new}%;background:linear-gradient(90deg,#4ade80,#22c55e);transition:width .6s ease;border-radius:11px 0 0 11px"></div>
+        <div style="width:${d.pct_recurring}%;background:linear-gradient(90deg,#a78bfa,#8b5cf6);transition:width .6s ease;border-radius:0 11px 11px 0"></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="background:#12141e;border-radius:10px;padding:16px;border:1px solid #2d3148">
+        <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Nouveaux clients (1ère commande)</div>
+        <div style="font-size:32px;font-weight:700;color:#4ade80">${d.new_clients_count}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">Clients avec une 1ère facture sur la période</div>
+      </div>
+      <div style="background:#12141e;border-radius:10px;padding:16px;border:1px solid #2d3148">
+        <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Valeur moy. / nouveau client</div>
+        <div style="font-size:32px;font-weight:700;color:#a78bfa">${d.avg_new_client_value ? fmtEur(d.avg_new_client_value) : '—'}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">CA nouveaux ÷ nb nouveaux clients</div>
+      </div>
+    </div>`;
+}
 
 // ── Init ─────────────────────────────────────────────────────
 buildMonthCombo();

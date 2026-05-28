@@ -296,6 +296,64 @@ def get_transactions(
     return {"data": q.execute().data}
 
 
+@app.get("/api/customers_kpis")
+def get_customers_kpis(
+    date_from: str = Query(...),
+    date_to:   str = Query(...),
+):
+    """Nouveaux clients vs récurrents sur une période — basé sur customer_invoices_sync."""
+    # 1. Factures dans la période
+    in_period = (
+        sb.table("customer_invoices_sync")
+        .select("customer_id, amount")
+        .gte("date", date_from)
+        .lte("date", date_to)
+        .execute().data
+    )
+    if not in_period:
+        return {"date_from": date_from, "date_to": date_to, "data": None}
+
+    customer_ids = list({r["customer_id"] for r in in_period})
+
+    # 2. Ces clients ont-ils une facture AVANT la période ? → récurrents
+    before = (
+        sb.table("customer_invoices_sync")
+        .select("customer_id")
+        .in_("customer_id", customer_ids)
+        .lt("date", date_from)
+        .execute().data
+    )
+    recurring_ids = {r["customer_id"] for r in before}
+
+    # 3. Calcul CA nouveaux / récurrents
+    new_clients  = set()
+    ca_new       = 0.0
+    ca_recurring = 0.0
+    for inv in in_period:
+        cid    = inv["customer_id"]
+        amount = float(inv["amount"] or 0)
+        if cid in recurring_ids:
+            ca_recurring += amount
+        else:
+            new_clients.add(cid)
+            ca_new += amount
+
+    ca_total = ca_new + ca_recurring
+    return {
+        "date_from": date_from,
+        "date_to":   date_to,
+        "data": {
+            "new_clients_count":   len(new_clients),
+            "ca_new":              round(ca_new, 2),
+            "ca_recurring":        round(ca_recurring, 2),
+            "ca_total":            round(ca_total, 2),
+            "pct_new":             round(ca_new / ca_total * 100, 1) if ca_total else 0,
+            "pct_recurring":       round(ca_recurring / ca_total * 100, 1) if ca_total else 0,
+            "avg_new_client_value": round(ca_new / len(new_clients), 2) if new_clients else 0,
+        }
+    }
+
+
 # Sert le frontend HTML en production
 _frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.exists(_frontend_dir):

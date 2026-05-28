@@ -1,4 +1,6 @@
 import os
+import re
+from collections import defaultdict
 from datetime import date, timedelta
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
@@ -6,6 +8,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 
 app = FastAPI(title="FinBoard API")
+
+# ── Helpers extraction email / nom depuis libellé Pennylane ────
+_EMAIL_RE = re.compile(r'[\w.+%-]+@[\w.-]+\.[a-z]{2,}', re.IGNORECASE)
+_NAME_RE  = re.compile(r'-\s+(.+?)\s+-\s+[\w.+%-]+@[\w.-]+', re.IGNORECASE)
+
+def _extract_email(label: str):
+    m = _EMAIL_RE.search(label or "")
+    return m.group(0).lower() if m else None
+
+def _extract_name(label: str):
+    m = _NAME_RE.search(label or "")
+    return m.group(1).strip() if m else None
+
+def _add_months(d: date, n: int) -> date:
+    month = d.month + n
+    year  = d.year + (month - 1) // 12
+    month = (month - 1) % 12 + 1
+    return date(year, month, 1)
 
 app.add_middleware(
     CORSMiddleware,
@@ -294,6 +314,174 @@ def get_transactions(
     if date_from:  q = q.gte("date", date_from)
     if date_to:    q = q.lte("date", date_to)
     return {"data": q.execute().data}
+
+
+@app.get("/api/kpi_clients")
+def get_kpi_clients(
+    date_from: str = Query(...),
+    date_to:   str = Query(...),
+):
+    """
+    4 segments clients (date zéro = 2026-05-01) :
+    Nouveau client / Récurrent / Nouveau produit / Impayés
+    Identification client par email extrait du libellé de transaction.
+    """
+    DATE_ZERO = "2026-05-01"
+
+    # 1. Catégories revenus
+    rev_cats  = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
+    cat_names = [r["pennylane_category_name"] for r in rev_cats]
+    if not cat_names:
+        return {"date_from": date_from, "date_to": date_to, "data": None}
+
+    # 2. Toutes les transactions revenue depuis DATE_ZERO (historique complet)
+    all_txs = (
+        sb.table("transactions")
+        .select("date, label, amount, category_name, direction")
+        .in_("category_name", cat_names)
+        .eq("direction", "credit")
+        .gte("date", DATE_ZERO)
+        .order("date")
+        .execute().data
+    )
+    if not all_txs:
+        return {"date_from": date_from, "date_to": date_to, "data": None}
+
+    # 3. Enrichir avec email + nom
+    for tx in all_txs:
+        tx["email"] = _extract_email(tx.get("label", ""))
+        tx["name"]  = _extract_name(tx.get("label", ""))
+    txs_ok = [tx for tx in all_txs if tx["email"]]
+
+    # 4. Historique complet par client
+    history = defaultdict(list)
+    names   = {}
+    for tx in txs_ok:
+        history[tx["email"]].append(tx)
+        if tx["email"] not in names and tx["name"]:
+            names[tx["email"]] = tx["name"]
+
+    # 5. Transactions dans la période
+    period_txs = [tx for tx in txs_ok if date_from <= tx["date"] <= date_to]
+
+    # 6. Emails et produits vus AVANT la période (depuis DATE_ZERO)
+    before_txs      = [tx for tx in txs_ok if DATE_ZERO <= tx["date"] < date_from]
+    emails_before   = {tx["email"] for tx in before_txs}
+    products_before = defaultdict(set)
+    for tx in before_txs:
+        products_before[tx["email"]].add(tx["category_name"])
+
+    # 7. Classifier chaque client actif dans la période
+    period_by_email = defaultdict(lambda: {"ca": 0.0, "cats": set()})
+    for tx in period_txs:
+        period_by_email[tx["email"]]["ca"]   += float(tx["amount"] or 0)
+        period_by_email[tx["email"]]["cats"].add(tx["category_name"])
+
+    new_clients = {"count": 0, "ca": 0.0}
+    recurring   = {"count": 0, "ca": 0.0}
+    new_product = {"count": 0, "ca": 0.0}
+
+    for email, info in period_by_email.items():
+        if email not in emails_before:
+            new_clients["count"] += 1
+            new_clients["ca"]    += info["ca"]
+        else:
+            old_prods = info["cats"] & products_before[email]
+            nw_prods  = info["cats"] - products_before[email]
+            if old_prods:
+                recurring["count"] += 1
+                recurring["ca"]    += sum(
+                    float(tx["amount"] or 0) for tx in period_txs
+                    if tx["email"] == email and tx["category_name"] in old_prods
+                )
+            if nw_prods:
+                new_product["count"] += 1
+                new_product["ca"]    += sum(
+                    float(tx["amount"] or 0) for tx in period_txs
+                    if tx["email"] == email and tx["category_name"] in nw_prods
+                )
+
+    # 8. Détection impayés (gaps mensuels + alerte dès le 8 du mois)
+    today_d = date.today()
+    df      = date.fromisoformat(date_from)
+    dt      = date.fromisoformat(date_to)
+
+    impayes_list   = []
+    impayes_emails = set()
+
+    for email, txs in history.items():
+        by_prod = defaultdict(set)
+        for tx in txs:
+            m = date.fromisoformat(tx["date"]).replace(day=1)
+            by_prod[tx["category_name"]].add(m)
+
+        for prod, months_paid in by_prod.items():
+            if len(months_paid) < 2:
+                continue
+            months_sorted = sorted(months_paid)
+
+            # Gaps entre paiements consécutifs
+            for i in range(len(months_sorted) - 1):
+                m1, m2   = months_sorted[i], months_sorted[i + 1]
+                expected = _add_months(m1, 1)
+                if m2 > expected:
+                    curr = expected
+                    while curr < m2:
+                        if df <= curr <= dt:
+                            impayes_list.append({
+                                "email":   email,
+                                "name":    names.get(email, email),
+                                "product": prod,
+                                "month":   curr.isoformat(),
+                                "active":  False,
+                            })
+                            impayes_emails.add(email)
+                        curr = _add_months(curr, 1)
+
+            # Mois courant : alerte si aujourd'hui >= 8 et paiement manquant
+            if today_d.day >= 8:
+                last_paid    = months_sorted[-1]
+                expected_now = _add_months(last_paid, 1)
+                current_m    = today_d.replace(day=1)
+                if (expected_now == current_m
+                        and current_m not in months_paid
+                        and df <= current_m <= dt):
+                    impayes_list.append({
+                        "email":   email,
+                        "name":    names.get(email, email),
+                        "product": prod,
+                        "month":   current_m.isoformat(),
+                        "active":  True,
+                    })
+                    impayes_emails.add(email)
+
+    # 9. Historique détaillé uniquement pour les clients en impayé
+    client_history = {}
+    for email in impayes_emails:
+        client_history[email] = sorted([
+            {
+                "date":     tx["date"],
+                "amount":   round(float(tx["amount"] or 0), 2),
+                "category": tx["category_name"],
+                "label":    tx.get("label", ""),
+            }
+            for tx in history[email]
+        ], key=lambda x: x["date"])
+
+    return {
+        "date_from": date_from,
+        "date_to":   date_to,
+        "data": {
+            "new_clients":  {"count": new_clients["count"], "ca": round(new_clients["ca"], 2)},
+            "recurring":    {"count": recurring["count"],   "ca": round(recurring["ca"], 2)},
+            "new_product":  {"count": new_product["count"], "ca": round(new_product["ca"], 2)},
+            "impayes": {
+                "count":          len(impayes_list),
+                "details":        impayes_list,
+                "client_history": client_history,
+            },
+        }
+    }
 
 
 @app.get("/api/customers_kpis")

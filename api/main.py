@@ -316,6 +316,36 @@ def get_transactions(
     return {"data": q.execute().data}
 
 
+@app.get("/api/debug_kpi")
+def debug_kpi(date_from: str = Query(...), date_to: str = Query(...)):
+    """Diagnostic : compte les transactions revenue dans la période."""
+    rev_cats  = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
+    cat_names = [r["pennylane_category_name"] for r in rev_cats]
+
+    # Transactions brutes dans la période (sans filtre catégorie, sans filtre direction)
+    all_period = (
+        sb.table("transactions")
+        .select("date, direction, category_name, label")
+        .gte("date", date_from)
+        .order("date")
+        .execute().data
+    )
+    all_period = [t for t in all_period if t["date"] <= date_to]
+    credit_period = [t for t in all_period if t.get("direction") == "credit"]
+    rev_period    = [t for t in credit_period if t.get("category_name") in cat_names]
+    with_email    = [t for t in rev_period if _extract_email(t.get("label", ""))]
+
+    return {
+        "n_rev_cats":        len(cat_names),
+        "rev_cats_sample":   cat_names[:5],
+        "n_all_period":      len(all_period),
+        "n_credit_period":   len(credit_period),
+        "n_rev_period":      len(rev_period),
+        "n_with_email":      len(with_email),
+        "sample":            rev_period[:2],
+    }
+
+
 @app.get("/api/kpi_clients")
 def get_kpi_clients(
     date_from: str = Query(...),
@@ -325,30 +355,8 @@ def get_kpi_clients(
     4 segments clients :
     Nouveau client / Récurrent / Nouveau produit / Impayés
     Identification client par email extrait du libellé de transaction.
-    2 requêtes séparées pour éviter la limite Supabase 1000 lignes.
     """
     DATE_HISTORY = "2026-01-01"   # début des données dispo dans Pennylane
-
-    def _fetch_txs(q):
-        """Fetch toutes les lignes via pagination cursor."""
-        rows, page = [], 0
-        size = 1000
-        while True:
-            batch = q.range(page * size, (page + 1) * size - 1).execute().data
-            rows.extend(batch)
-            if len(batch) < size:
-                break
-            page += 1
-        return rows
-
-    def _base_q():
-        return (
-            sb.table("transactions")
-            .select("date, label, amount, category_name, direction")
-            .in_("category_name", cat_names)
-            .eq("direction", "credit")
-            .order("date")
-        )
 
     # 1. Catégories revenus
     rev_cats  = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
@@ -356,43 +364,51 @@ def get_kpi_clients(
     if not cat_names:
         return {"date_from": date_from, "date_to": date_to, "data": None}
 
-    # 2a. Transactions dans la période (date_from → date_to)
-    period_raw = _fetch_txs(_base_q().gte("date", date_from).lte("date", date_to))
+    # 2a. Transactions de la PÉRIODE — même pattern que l'original qui retournait 576
+    #     gte seulement (pas de lte), filtre Python sur date_to
+    period_raw = (
+        sb.table("transactions")
+        .select("date, label, amount, category_name, direction")
+        .in_("category_name", cat_names)
+        .eq("direction", "credit")
+        .gte("date", date_from)
+        .order("date")
+        .execute().data
+    )
+    period_raw = [tx for tx in period_raw if tx["date"] <= date_to]
 
-    # 2b. Historique AVANT la période (DATE_HISTORY → date_from-1)
-    #     Nécessaire pour détecter les récurrents et les impayés
-    before_raw = _fetch_txs(_base_q().gte("date", DATE_HISTORY).lt("date", date_from))
+    # 2b. Historique AVANT la période — même pattern, gte DATE_HISTORY, filtre Python < date_from
+    before_raw = (
+        sb.table("transactions")
+        .select("date, label, amount, category_name, direction")
+        .in_("category_name", cat_names)
+        .eq("direction", "credit")
+        .gte("date", DATE_HISTORY)
+        .order("date")
+        .execute().data
+    )
+    before_raw = [tx for tx in before_raw if tx["date"] < date_from]
 
-    all_raw = before_raw + period_raw
-    if not all_raw:
+    if not period_raw and not before_raw:
         return {"date_from": date_from, "date_to": date_to, "data": None}
 
     # 3. Enrichir avec email + nom
-    for tx in all_raw:
+    for tx in period_raw + before_raw:
         tx["email"] = _extract_email(tx.get("label", ""))
         tx["name"]  = _extract_name(tx.get("label", ""))
 
+    period_ok = [tx for tx in period_raw if tx["email"]]
     before_ok = [tx for tx in before_raw if tx["email"]]
-    period_ok  = [tx for tx in period_raw if tx["email"]]
-    all_ok    = before_ok + period_ok
-
-    if not period_ok:
-        return {"date_from": date_from, "date_to": date_to, "data": {
-            "new_clients": {"count": 0, "ca": 0.0},
-            "recurring":   {"count": 0, "ca": 0.0},
-            "new_product": {"count": 0, "ca": 0.0},
-            "impayes":     {"count": 0, "details": [], "client_history": {}},
-        }}
 
     # 4. Historique complet par client
     history = defaultdict(list)
     names   = {}
-    for tx in all_ok:
+    for tx in before_ok + period_ok:
         history[tx["email"]].append(tx)
         if tx["email"] not in names and tx["name"]:
             names[tx["email"]] = tx["name"]
 
-    # 5. Transactions dans la période (déjà filtrées)
+    # 5. Transactions dans la période
     period_txs = period_ok
 
     # 6. Emails et produits vus AVANT la période

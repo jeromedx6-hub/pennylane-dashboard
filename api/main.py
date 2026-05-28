@@ -363,45 +363,54 @@ def get_kpi_clients(
     date_to:   str = Query(...),
 ):
     """
-    4 segments clients :
-    Nouveau client / Récurrent / Nouveau produit / Impayés
-    Identification client par email extrait du libellé de transaction.
+    4 segments clients — Nouveau / Récurrent / Nouveau produit / Impayés.
+    Filtrage catégories en Python (le .in_() Supabase SDK échoue silencieusement
+    sur les noms accentués). Pagination via .range() pour dépasser 1000 lignes.
     """
-    DATE_HISTORY = "2026-01-01"   # début des données dispo dans Pennylane
+    DATE_HISTORY = "2026-01-01"
 
-    # 1. Catégories revenus
-    rev_cats  = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
-    cat_names = [r["pennylane_category_name"] for r in rev_cats]
-    if not cat_names:
+    # 1. Catégories revenus (set pour lookup O(1))
+    rev_cats = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
+    cat_set  = {r["pennylane_category_name"] for r in rev_cats}
+    if not cat_set:
         return {"date_from": date_from, "date_to": date_to, "data": None}
 
-    # 2a. Transactions de la PÉRIODE — même pattern que l'original qui retournait 576
-    #     gte seulement (pas de lte), filtre Python sur date_to
-    period_raw = (
-        sb.table("transactions")
-        .select("date, label, amount, category_name, direction")
-        .in_("category_name", cat_names)
-        .eq("direction", "credit")
-        .gte("date", date_from)
-        .order("date")
-        .execute().data
-    )
-    period_raw = [tx for tx in period_raw if tx["date"] <= date_to]
+    def _fetch_credit(gte_date, max_pages=15):
+        """Récupère toutes les transactions credit depuis gte_date via pagination."""
+        rows, page, size = [], 0, 1000
+        while page < max_pages:
+            batch = (
+                sb.table("transactions")
+                .select("date, label, amount, category_name, direction")
+                .eq("direction", "credit")
+                .gte("date", gte_date)
+                .order("date")
+                .range(page * size, (page + 1) * size - 1)
+                .execute().data
+            )
+            rows.extend(batch)
+            if len(batch) < size:
+                break
+            page += 1
+        return rows
 
-    # 2b. Historique AVANT la période — même pattern, gte DATE_HISTORY, filtre Python < date_from
-    before_raw = (
-        sb.table("transactions")
-        .select("date, label, amount, category_name, direction")
-        .in_("category_name", cat_names)
-        .eq("direction", "credit")
-        .gte("date", DATE_HISTORY)
-        .order("date")
-        .execute().data
-    )
-    before_raw = [tx for tx in before_raw if tx["date"] < date_from]
+    # 2a. Transactions PÉRIODE (credit, filtre catégorie en Python)
+    period_credit = _fetch_credit(date_from)
+    period_raw    = [tx for tx in period_credit
+                     if tx["date"] <= date_to and tx.get("category_name") in cat_set]
 
-    if not period_raw and not before_raw:
-        return {"date_from": date_from, "date_to": date_to, "data": None}
+    # 2b. Historique AVANT la période (credit depuis DATE_HISTORY, filtre Python)
+    history_credit = _fetch_credit(DATE_HISTORY)
+    before_raw     = [tx for tx in history_credit
+                      if tx["date"] < date_from and tx.get("category_name") in cat_set]
+
+    if not period_raw:
+        return {"date_from": date_from, "date_to": date_to, "data": {
+            "new_clients": {"count": 0, "ca": 0.0},
+            "recurring":   {"count": 0, "ca": 0.0},
+            "new_product": {"count": 0, "ca": 0.0},
+            "impayes":     {"count": 0, "details": [], "client_history": {}},
+        }}
 
     # 3. Enrichir avec email + nom
     for tx in period_raw + before_raw:

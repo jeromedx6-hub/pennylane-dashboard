@@ -325,9 +325,30 @@ def get_kpi_clients(
     4 segments clients :
     Nouveau client / Récurrent / Nouveau produit / Impayés
     Identification client par email extrait du libellé de transaction.
-    Historique depuis le début des données Pennylane (2026-01-01).
+    2 requêtes séparées pour éviter la limite Supabase 1000 lignes.
     """
     DATE_HISTORY = "2026-01-01"   # début des données dispo dans Pennylane
+
+    def _fetch_txs(q):
+        """Fetch toutes les lignes via pagination cursor."""
+        rows, page = [], 0
+        size = 1000
+        while True:
+            batch = q.range(page * size, (page + 1) * size - 1).execute().data
+            rows.extend(batch)
+            if len(batch) < size:
+                break
+            page += 1
+        return rows
+
+    def _base_q():
+        return (
+            sb.table("transactions")
+            .select("date, label, amount, category_name, direction")
+            .in_("category_name", cat_names)
+            .eq("direction", "credit")
+            .order("date")
+        )
 
     # 1. Catégories revenus
     rev_cats  = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
@@ -335,43 +356,49 @@ def get_kpi_clients(
     if not cat_names:
         return {"date_from": date_from, "date_to": date_to, "data": None}
 
-    # 2. Toutes les transactions revenue depuis le début de l'historique
-    #    Pas de filtre lte ici (bug Supabase SDK sur double filtre même colonne)
-    #    Le filtre par période se fait en Python ci-dessous
-    all_txs = (
-        sb.table("transactions")
-        .select("date, label, amount, category_name, direction")
-        .in_("category_name", cat_names)
-        .eq("direction", "credit")
-        .gte("date", DATE_HISTORY)
-        .order("date")
-        .execute().data
-    )
-    if not all_txs:
+    # 2a. Transactions dans la période (date_from → date_to)
+    period_raw = _fetch_txs(_base_q().gte("date", date_from).lte("date", date_to))
+
+    # 2b. Historique AVANT la période (DATE_HISTORY → date_from-1)
+    #     Nécessaire pour détecter les récurrents et les impayés
+    before_raw = _fetch_txs(_base_q().gte("date", DATE_HISTORY).lt("date", date_from))
+
+    all_raw = before_raw + period_raw
+    if not all_raw:
         return {"date_from": date_from, "date_to": date_to, "data": None}
 
     # 3. Enrichir avec email + nom
-    for tx in all_txs:
+    for tx in all_raw:
         tx["email"] = _extract_email(tx.get("label", ""))
         tx["name"]  = _extract_name(tx.get("label", ""))
-    txs_ok = [tx for tx in all_txs if tx["email"]]
 
-    # 4. Historique complet par client (depuis début history)
+    before_ok = [tx for tx in before_raw if tx["email"]]
+    period_ok  = [tx for tx in period_raw if tx["email"]]
+    all_ok    = before_ok + period_ok
+
+    if not period_ok:
+        return {"date_from": date_from, "date_to": date_to, "data": {
+            "new_clients": {"count": 0, "ca": 0.0},
+            "recurring":   {"count": 0, "ca": 0.0},
+            "new_product": {"count": 0, "ca": 0.0},
+            "impayes":     {"count": 0, "details": [], "client_history": {}},
+        }}
+
+    # 4. Historique complet par client
     history = defaultdict(list)
     names   = {}
-    for tx in txs_ok:
+    for tx in all_ok:
         history[tx["email"]].append(tx)
         if tx["email"] not in names and tx["name"]:
             names[tx["email"]] = tx["name"]
 
-    # 5. Transactions dans la période
-    period_txs = [tx for tx in txs_ok if date_from <= tx["date"] <= date_to]
+    # 5. Transactions dans la période (déjà filtrées)
+    period_txs = period_ok
 
-    # 6. Emails et produits vus AVANT la période (tout l'historique antérieur)
-    before_txs      = [tx for tx in txs_ok if tx["date"] < date_from]
-    emails_before   = {tx["email"] for tx in before_txs}
+    # 6. Emails et produits vus AVANT la période
+    emails_before   = {tx["email"] for tx in before_ok}
     products_before = defaultdict(set)
-    for tx in before_txs:
+    for tx in before_ok:
         products_before[tx["email"]].add(tx["category_name"])
 
     # 7. Classifier chaque client actif dans la période

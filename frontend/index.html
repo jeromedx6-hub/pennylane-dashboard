@@ -40,6 +40,15 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 .sync-badge { display:flex; align-items:center; gap:6px; font-size:11px; color:#4ade80; background:rgba(74,222,128,.08); border:1px solid rgba(74,222,128,.2); border-radius:6px; padding:5px 10px; }
 .dot { width:6px; height:6px; background:#4ade80; border-radius:50%; animation:pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+.sync-btn { display:flex; align-items:center; gap:6px; background:#1e2235; border:1px solid #2d3148; border-radius:8px; padding:6px 12px; cursor:pointer; color:#94a3b8; font-size:12px; transition:all .15s; white-space:nowrap; }
+.sync-btn:hover:not(:disabled) { border-color:#6366f1; color:#e2e8f0; }
+.sync-btn:disabled, .sync-btn.running { border-color:#f59e0b; color:#f59e0b; cursor:not-allowed; }
+.spin { display:inline-block; animation:_spin 1s linear infinite; }
+@keyframes _spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+.toast { position:fixed; bottom:24px; right:24px; background:#1a1d27; border:1px solid #2d3148; border-radius:10px; padding:14px 20px; font-size:13px; color:#e2e8f0; z-index:9999; transform:translateY(100px); opacity:0; transition:all .35s cubic-bezier(.4,0,.2,1); box-shadow:0 8px 32px rgba(0,0,0,.5); pointer-events:none; }
+.toast.show { transform:translateY(0); opacity:1; }
+.toast.success { border-color:#4ade80; }
+.toast.error   { border-color:#f87171; }
 
 /* ── KPI Cards ───────────────────────────────────────────── */
 .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px; }
@@ -177,6 +186,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
         style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 16px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:170px;outline:none">
       </select>
       <div class="sync-badge"><div class="dot"></div><span id="sync-time">Sync OK</span></div>
+      <button class="sync-btn" id="sync-btn-indicateurs" onclick="openSyncModal()">⟳ Recalculer</button>
     </div>
   </div>
 
@@ -281,6 +291,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
           style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:6px 10px;color:#e2e8f0;font-size:12px">
       </div>
       <div class="sync-badge"><span id="kpi-period-label">Ce mois</span></div>
+      <button class="sync-btn" id="sync-btn-kpi" onclick="openSyncModal()">⟳ Recalculer</button>
     </div>
   </div>
 
@@ -1383,6 +1394,123 @@ function closeImpayes() {
 // ── Init ─────────────────────────────────────────────────────
 buildMonthCombo();
 fetchAll();
+
+// ── Sync manuel ──────────────────────────────────────────────
+let _syncPoll = null;
+
+function openSyncModal() {
+  const today = new Date().toISOString().slice(0,10);
+  const from  = new Date(Date.now() - 60*24*60*60*1000).toISOString().slice(0,10);
+  document.getElementById('sync-modal-from').value = from;
+  document.getElementById('sync-modal-to').value   = today;
+  document.getElementById('sync-modal-form').style.display    = '';
+  document.getElementById('sync-modal-progress').style.display = 'none';
+  const btn = document.getElementById('sync-modal-btn');
+  btn.disabled    = false;
+  btn.textContent = '🔄 Lancer le sync';
+  document.getElementById('sync-modal').classList.add('open');
+}
+
+function closeSyncModal() {
+  if (_syncPoll) return; // bloquer fermeture pendant sync
+  document.getElementById('sync-modal').classList.remove('open');
+}
+
+async function launchSync() {
+  const from = document.getElementById('sync-modal-from').value;
+  const to   = document.getElementById('sync-modal-to').value;
+  if (!from || !to || from > to) { showToast('⚠ Dates invalides', 'error'); return; }
+
+  const btn = document.getElementById('sync-modal-btn');
+  btn.disabled    = true;
+  btn.textContent = '⟳ Sync en cours…';
+  document.getElementById('sync-modal-form').style.opacity    = '.5';
+  document.getElementById('sync-modal-progress').style.display = '';
+  document.getElementById('sync-progress-label').textContent  = `Sync ${from} → ${to}…`;
+  _setSyncBtns(true);
+
+  await fetch(`/api/sync?date_from=${from}&date_to=${to}`, {method:'POST'});
+
+  _syncPoll = setInterval(async () => {
+    try {
+      const r = await fetch('/api/sync_status');
+      const s = await r.json();
+      if (!s.running) {
+        clearInterval(_syncPoll); _syncPoll = null;
+        document.getElementById('sync-modal').classList.remove('open');
+        _setSyncBtns(false);
+        if (s.error) {
+          showToast('❌ Erreur : ' + s.error, 'error');
+        } else {
+          showToast(`✅ Sync terminé · ${from} → ${to}`, 'success');
+          // Refresh la page active
+          const pg = document.querySelector('.page[style*="display: block"], .page:not([style*="none"])');
+          if (document.getElementById('page-indicateurs').style.display !== 'none') fetchAll();
+          else if (document.getElementById('page-kpi').style.display     !== 'none') fetchKpiData();
+        }
+      }
+    } catch(e) { /* ignore erreurs réseau transitoires */ }
+  }, 2000);
+}
+
+function _setSyncBtns(running) {
+  document.querySelectorAll('.sync-btn').forEach(b => {
+    b.disabled = running;
+    b.classList.toggle('running', running);
+    b.innerHTML = running ? '<span class="spin">⟳</span> En cours…' : '⟳ Recalculer';
+  });
+}
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => { t.className = 'toast'; }, 5500);
+}
 </script>
+
+<!-- ── Modal Sync ─────────────────────────────────────────── -->
+<div class="modal-overlay" id="sync-modal" onclick="closeSyncModal()">
+  <div class="modal" style="width:420px;max-width:95vw" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeSyncModal()">✕</button>
+    <div class="modal-title">Recalculer les données</div>
+    <div class="modal-sub" style="margin-bottom:20px">Resynchronise Pennylane → Supabase sur la période choisie et recalcule le P&L</div>
+
+    <div id="sync-modal-form">
+      <div style="display:flex;gap:12px;margin-bottom:16px">
+        <div style="flex:1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Date début</label>
+          <input type="date" id="sync-modal-from"
+            style="width:100%;background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:8px 10px;color:#e2e8f0;font-size:12px;outline:none">
+        </div>
+        <div style="flex:1">
+          <label style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Date fin</label>
+          <input type="date" id="sync-modal-to"
+            style="width:100%;background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:8px 10px;color:#e2e8f0;font-size:12px;outline:none">
+        </div>
+      </div>
+      <div style="background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:11px;color:#64748b;line-height:1.6">
+        ⚡ Recalcule les <strong style="color:#94a3b8">transactions</strong>, le <strong style="color:#94a3b8">P&L quotidien</strong> et les <strong style="color:#94a3b8">KPIs</strong> pour cette période.<br>
+        Utile si des montants ont été corrigés dans Pennylane.
+      </div>
+      <button id="sync-modal-btn" onclick="launchSync()"
+        style="width:100%;padding:11px;background:#6366f1;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s"
+        onmouseover="this.style.background='#4f46e5'" onmouseout="this.style.background='#6366f1'">
+        🔄 Lancer le sync
+      </button>
+    </div>
+
+    <div id="sync-modal-progress" style="display:none;text-align:center;padding:20px 0">
+      <div style="font-size:28px;margin-bottom:12px"><span class="spin" style="display:inline-block">⟳</span></div>
+      <div id="sync-progress-label" style="color:#94a3b8;font-size:13px"></div>
+      <div style="font-size:11px;color:#475569;margin-top:8px">Récupération Pennylane · Calcul P&L · KPIs…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ─────────────────────────────────────────────── -->
+<div id="toast" class="toast"></div>
+
 </body>
 </html>

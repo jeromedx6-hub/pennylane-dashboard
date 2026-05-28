@@ -1,11 +1,22 @@
 import os
 import re
+import sys as _sys
+import threading
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime as _dt
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
+
+# Rend sync.py importable depuis l'API
+_sync_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'sync')
+if _sync_dir not in _sys.path:
+    _sys.path.insert(0, _sync_dir)
+
+_sync_lock  = threading.Lock()
+_sync_state = {"running": False, "started_at": None, "finished_at": None,
+               "error": None, "date_from": None, "date_to": None}
 
 app = FastAPI(title="FinBoard API")
 
@@ -586,6 +597,50 @@ def get_customers_kpis(
             "avg_new_client_value": round(ca_new / len(new_clients), 2) if new_clients else 0,
         }
     }
+
+
+@app.post("/api/sync")
+def trigger_sync(
+    date_from: str = Query(default=None),
+    date_to:   str = Query(default=None),
+):
+    """Lance le sync Pennylane → Supabase en arrière-plan."""
+    with _sync_lock:
+        if _sync_state["running"]:
+            return {"status": "already_running", "state": _sync_state}
+
+    today  = date.today()
+    d_to   = date.fromisoformat(date_to)   if date_to   else today
+    d_from = date.fromisoformat(date_from) if date_from else d_to - timedelta(days=60)
+
+    def _run():
+        with _sync_lock:
+            _sync_state["running"]     = True
+            _sync_state["started_at"]  = _dt.now().strftime("%H:%M:%S")
+            _sync_state["finished_at"] = None
+            _sync_state["error"]       = None
+            _sync_state["date_from"]   = d_from.isoformat()
+            _sync_state["date_to"]     = d_to.isoformat()
+        try:
+            import sync as _sync_mod
+            _sync_mod.run(d_from, d_to)
+            with _sync_lock:
+                _sync_state["running"]     = False
+                _sync_state["finished_at"] = _dt.now().strftime("%H:%M:%S")
+        except Exception as e:
+            with _sync_lock:
+                _sync_state["running"]     = False
+                _sync_state["error"]       = str(e)
+                _sync_state["finished_at"] = _dt.now().strftime("%H:%M:%S")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "date_from": d_from.isoformat(), "date_to": d_to.isoformat()}
+
+
+@app.get("/api/sync_status")
+def get_sync_status():
+    """État du sync en cours ou dernier sync."""
+    return _sync_state
 
 
 # Sert le frontend HTML en production

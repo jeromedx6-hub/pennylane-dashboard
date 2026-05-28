@@ -100,9 +100,14 @@ def compute_pl_daily(sb, mapping, target_date):
         aggregated[key]["amount"]   += sign * float(tx["amount"] or 0)
         aggregated[key]["tx_count"] += 1
 
+    # DELETE + INSERT (pas upsert) pour supprimer les postes qui n'ont
+    # plus de transactions (ex : tx supprimée dans Pennylane depuis le dernier sync)
+    sb.table("pl_daily").delete().eq("date", date_str).execute()
     if aggregated:
-        sb.table("pl_daily").upsert(list(aggregated.values()), on_conflict="date,poste_budgetaire").execute()
+        sb.table("pl_daily").insert(list(aggregated.values())).execute()
         log.info(f"  pl_daily : {len(aggregated)} postes — {date_str}")
+    else:
+        log.info(f"  pl_daily : 0 postes — {date_str} (toutes lignes supprimées)")
 
 
 def compute_kpis(sb, target_date):

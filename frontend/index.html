@@ -920,6 +920,18 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
   window._currentTxByMonth = byMonthTx;
   window._currentPlLabel   = document.getElementById('modal-title')?.textContent?.replace(' — Évolution mensuelle','') || 'export';
 
+  // ── Catégories Pennylane uniques ─────────────────────────────
+  const uniqueCats = transactions && transactions.length
+    ? [...new Set(transactions.map(tx => tx.category_name).filter(Boolean))].sort()
+    : [];
+  if (uniqueCats.length) {
+    const chips = uniqueCats.map(c =>
+      `<span style="display:inline-block;background:#1e2235;border:1px solid #2d3148;border-radius:4px;padding:2px 8px;font-size:10px;color:#94a3b8;margin:2px 3px 0 0">${c}</span>`
+    ).join('');
+    document.getElementById('modal-sub').innerHTML =
+      `Année ${year} · Source : Pennylane<br><span style="font-size:10px;color:#475569;font-weight:400">Catégories : </span>${chips}`;
+  }
+
   const totalTxCount = transactions ? transactions.length : 0;
 
   // ── Table mensuelle ──────────────────────────────────────────
@@ -935,7 +947,7 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
       </button>` : ''}
     </div>
     <table class="detail-table">
-      <thead><tr>${hasTx?'<th style="width:22px"></th>':''}<th>Mois</th><th>Mensuel</th><th>YTD Cumulé</th></tr></thead><tbody>`;
+      <thead><tr>${hasTx?'<th style="width:22px"></th>':''}<th>Mois</th>${hasTx?'<th style="text-align:left">Catégories</th>':''}<th>Mensuel</th><th>YTD Cumulé</th></tr></thead><tbody>`;
 
   for (const r of data) {
     const hasAmount  = r.amount !== 0;
@@ -945,15 +957,20 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
 
     if (hasTx && txCount > 0) {
       // Clickable row with expand arrow
-      const safeMonth = r.month; // format YYYY-MM, safe for id
+      const safeMonth  = r.month;
+      const monthCats  = [...new Set(txsForMonth.map(tx => tx.category_name).filter(Boolean))];
+      const catsHtml   = monthCats.map(c =>
+        `<span style="display:inline-block;background:#1a1d27;border:1px solid #2d3148;border-radius:3px;padding:1px 6px;font-size:9px;color:#64748b;margin-right:3px">${c}</span>`
+      ).join('');
       tHtml += `<tr style="cursor:pointer" onclick="toggleMonthTx('${safeMonth}')">
         <td style="color:#6366f1;font-size:11px;user-select:none" id="arrow-${safeMonth}">▶</td>
         <td>${monthLabel(r.month)} <span style="color:#475569;font-size:10px">(${txCount} op.)</span></td>
+        <td style="text-align:left">${catsHtml}</td>
         <td class="${cls}">${hasAmount ? (isRevenue?'':'— ')+fmtEur(Math.abs(r.amount)) : '<span style="color:#2d3148">—</span>'}</td>
         <td class="${r.ytd!==0?(isRevenue?'positive':'negative'):''}">${r.ytd!==0?(isRevenue?'':'— ')+fmtEur(Math.abs(r.ytd)):'—'}</td>
       </tr>
       <tr id="tx-detail-${safeMonth}" style="display:none">
-        <td colspan="4" style="padding:0 0 8px 0;background:transparent">
+        <td colspan="5" style="padding:0 0 8px 0;background:transparent">
           <table style="width:100%;border-collapse:collapse;background:#12141e;border:1px solid #2d3148;border-radius:0 0 6px 6px;margin-top:0">
             <thead><tr>
               <th style="padding:6px 10px;color:#475569;font-size:10px;font-weight:600;text-align:left;border-bottom:1px solid #2d3148;width:95px">Date</th>
@@ -975,6 +992,7 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
       tHtml += `<tr>
         ${hasTx ? '<td></td>' : ''}
         <td>${monthLabel(r.month)}</td>
+        ${hasTx ? '<td></td>' : ''}
         <td class="${cls}">${hasAmount ? (isRevenue?'':'— ')+fmtEur(Math.abs(r.amount)) : '<span style="color:#2d3148">—</span>'}</td>
         <td class="${r.ytd!==0?(isRevenue?'positive':'negative'):''}">${r.ytd!==0?(isRevenue?'':'— ')+fmtEur(Math.abs(r.ytd)):'—'}</td>
       </tr>`;

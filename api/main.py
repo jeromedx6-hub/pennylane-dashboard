@@ -26,10 +26,16 @@ def _month_range(month: str) -> tuple[str, str]:
 
 
 @app.get("/api/kpis")
-def get_kpis(month: str = Query(default=None)):
-    """KPIs agrégés sur un mois (défaut : mois courant)."""
-    month = month or date.today().strftime("%Y-%m")
-    d_from, d_to = _month_range(month)
+def get_kpis(month: str = Query(default=None), ytd: bool = Query(default=False)):
+    """KPIs agrégés sur un mois ou en YTD Jan→aujourd'hui."""
+    today = date.today()
+    if ytd:
+        d_from = f"{today.year}-01-01"
+        d_to   = today.isoformat()
+        month  = f"{today.year}-ytd"
+    else:
+        month  = month or today.strftime("%Y-%m")
+        d_from, d_to = _month_range(month)
 
     rows = (
         sb.table("kpis_daily")
@@ -85,10 +91,16 @@ def get_kpis(month: str = Query(default=None)):
 
 
 @app.get("/api/pl")
-def get_pl(month: str = Query(default=None)):
-    """P&L analytique mensuel par poste."""
-    month = month or date.today().strftime("%Y-%m")
-    d_from, d_to = _month_range(month)
+def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
+    """P&L analytique par poste — mois ou YTD Jan→aujourd'hui."""
+    today = date.today()
+    if ytd:
+        d_from = f"{today.year}-01-01"
+        d_to   = today.isoformat()
+        month  = f"{today.year}-ytd"
+    else:
+        month  = month or today.strftime("%Y-%m")
+        d_from, d_to = _month_range(month)
 
     rows = (
         sb.table("pl_daily")

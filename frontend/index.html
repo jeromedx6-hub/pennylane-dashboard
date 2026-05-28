@@ -175,12 +175,9 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
       <div class="header-sub" id="header-sub">Données Pennylane · Sync quotidienne automatique</div>
     </div>
     <div class="header-right">
-      <div class="date-selector">
-        <button class="date-btn" onclick="setWindow('today')">Aujourd'hui</button>
-        <button class="date-btn active" id="btn-month" onclick="setWindow('month')">Ce mois</button>
-        <button class="date-btn" onclick="setWindow('ytd')">YTD</button>
-      </div>
-      <input type="month" class="month-picker" id="month-picker" onchange="onMonthChange(this.value)">
+      <select id="month-combo" onchange="onComboChange(this.value)"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 16px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:170px;outline:none">
+      </select>
       <div class="sync-badge"><div class="dot"></div><span id="sync-time">Sync OK</span></div>
     </div>
   </div>
@@ -279,11 +276,12 @@ const API = window.location.port === '8080' || window.location.port === ''
   : 'http://localhost:8000';
 
 let state = {
-  month:    currentMonth(),
-  kpis:     null,
-  pl:       null,
-  evol:     null,
-  charges:  null,
+  month:   currentMonth(),
+  ytd:     false,
+  kpis:    null,
+  pl:      null,
+  evol:    null,
+  charges: null,
 };
 
 let chartEvol  = null;
@@ -328,15 +326,18 @@ function monthLabel(iso) {
 
 // ── Fetch ────────────────────────────────────────────────────
 async function fetchAll() {
-  const m = state.month;
-  document.getElementById('month-picker').value = m;
+  const m   = state.month;
+  const ytd = state.ytd;
+  const kpisUrl = ytd ? `${API}/api/kpis?ytd=true`      : `${API}/api/kpis?month=${m}`;
+  const plUrl   = ytd ? `${API}/api/pl?ytd=true`         : `${API}/api/pl?month=${m}`;
+  const chgUrl  = `${API}/api/charges_breakdown?month=${m}`;
 
   try {
     const [kpis, pl, evol, charges] = await Promise.all([
-      fetch(`${API}/api/kpis?month=${m}`).then(r=>r.json()),
-      fetch(`${API}/api/pl?month=${m}`).then(r=>r.json()),
+      fetch(kpisUrl).then(r=>r.json()),
+      fetch(plUrl).then(r=>r.json()),
       fetch(`${API}/api/evolution?months=12`).then(r=>r.json()),
-      fetch(`${API}/api/charges_breakdown?month=${m}`).then(r=>r.json()),
+      fetch(chgUrl).then(r=>r.json()),
     ]);
 
     state.kpis    = kpis.data;
@@ -363,11 +364,12 @@ function renderAll() {
   renderCAbars(state.pl);
 
   const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-  document.getElementById('sync-time').textContent = `Sync OK · ${now}`;
-  document.getElementById('last-sync').textContent = `Dernière sync · ${now}`;
-  document.getElementById('pl-sub').textContent    = monthLabel(state.month);
-  document.getElementById('ratios-sub').textContent = monthLabel(state.month);
-  document.getElementById('charges-sub').textContent = monthLabel(state.month);
+  const periodLbl = state.ytd ? `YTD ${state.month.slice(0,4)}` : monthLabel(state.month);
+  document.getElementById('sync-time').textContent  = `Sync OK · ${now}`;
+  document.getElementById('last-sync').textContent  = `Dernière sync · ${now}`;
+  document.getElementById('pl-sub').textContent     = periodLbl;
+  document.getElementById('ratios-sub').textContent = periodLbl;
+  document.getElementById('charges-sub').textContent = periodLbl;
 }
 
 function renderNoData() {
@@ -675,18 +677,29 @@ function renderCAbars(plData) {
 }
 
 // ── Month selector ───────────────────────────────────────────
-function setWindow(w) {
-  document.querySelectorAll('.date-btn').forEach(b=>b.classList.remove('active'));
-  if (w==='month') {
-    state.month = currentMonth();
-    document.getElementById('btn-month').classList.add('active');
-    fetchAll();
+function buildMonthCombo() {
+  const today = new Date();
+  const year  = today.getFullYear();
+  const cur   = state.month;
+  let html    = `<option value="ytd-${year}"${state.ytd ? ' selected' : ''}>YTD ${year}</option>`;
+  for (let i = 0; i < 18; i++) {
+    const d   = new Date(year, today.getMonth() - i, 1);
+    const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const lbl = d.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+    const cap = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+    html += `<option value="${val}"${!state.ytd && val===cur ? ' selected' : ''}>${cap}</option>`;
   }
+  document.getElementById('month-combo').innerHTML = html;
 }
 
-function onMonthChange(val) {
-  state.month = val;
-  document.querySelectorAll('.date-btn').forEach(b=>b.classList.remove('active'));
+function onComboChange(val) {
+  if (val.startsWith('ytd-')) {
+    state.ytd   = true;
+    state.month = currentMonth();
+  } else {
+    state.ytd   = false;
+    state.month = val;
+  }
   fetchAll();
 }
 
@@ -1086,7 +1099,7 @@ function closeModalOutside(e) {
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
 
 // ── Init ─────────────────────────────────────────────────────
-document.getElementById('month-picker').value = state.month;
+buildMonthCombo();
 fetchAll();
 </script>
 </body>

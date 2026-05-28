@@ -335,14 +335,15 @@ def get_kpi_clients(
     if not cat_names:
         return {"date_from": date_from, "date_to": date_to, "data": None}
 
-    # 2. Toutes les transactions revenue depuis le début de l'historique jusqu'à la fin de la période
+    # 2. Toutes les transactions revenue depuis le début de l'historique
+    #    Pas de filtre lte ici (bug Supabase SDK sur double filtre même colonne)
+    #    Le filtre par période se fait en Python ci-dessous
     all_txs = (
         sb.table("transactions")
         .select("date, label, amount, category_name, direction")
         .in_("category_name", cat_names)
         .eq("direction", "credit")
         .gte("date", DATE_HISTORY)
-        .lte("date", date_to)
         .order("date")
         .execute().data
     )

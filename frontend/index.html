@@ -916,6 +916,9 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
     }
   }
   const hasTx = Object.keys(byMonthTx).length > 0;
+  // Stocker globalement pour accès depuis les boutons de téléchargement
+  window._currentTxByMonth = byMonthTx;
+  window._currentPlLabel   = document.getElementById('modal-title')?.textContent?.replace(' — Évolution mensuelle','') || 'export';
 
   // ── Table mensuelle ──────────────────────────────────────────
   let tHtml = `<div class="modal-section" style="margin-top:20px">Récapitulatif mensuel</div>
@@ -939,6 +942,15 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
       </tr>
       <tr id="tx-detail-${safeMonth}" style="display:none">
         <td colspan="4" style="padding:0 0 8px 0;background:transparent">
+          <div style="display:flex;justify-content:flex-end;padding:4px 0 4px 0">
+            <button onclick="event.stopPropagation();downloadMonthTx('${safeMonth}')"
+              style="display:flex;align-items:center;gap:5px;background:#1a1d27;border:1px solid #2d3148;border-radius:6px;padding:4px 10px;color:#94a3b8;font-size:10px;cursor:pointer;transition:all .15s"
+              onmouseover="this.style.borderColor='#6366f1';this.style.color='#6366f1'"
+              onmouseout="this.style.borderColor='#2d3148';this.style.color='#94a3b8'">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12l-5-5h3V2h4v5h3l-5 5zm-6 2h12v1.5H2V14z"/></svg>
+              Télécharger Excel
+            </button>
+          </div>
           <table style="width:100%;border-collapse:collapse;background:#12141e;border:1px solid #2d3148;border-radius:0 0 6px 6px;margin-top:0">
             <thead><tr>
               <th style="padding:6px 10px;color:#475569;font-size:10px;font-weight:600;text-align:left;border-bottom:1px solid #2d3148;width:95px">Date</th>
@@ -981,6 +993,37 @@ function toggleMonthTx(month) {
   const open = detail.style.display === 'none';
   detail.style.display = open ? '' : 'none';
   if (arrow) arrow.textContent = open ? '▼' : '▶';
+}
+
+function downloadMonthTx(month) {
+  const txs   = (window._currentTxByMonth || {})[month] || [];
+  const label = (window._currentPlLabel || 'export').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  if (!txs.length) return;
+
+  // BOM UTF-8 pour Excel + séparateur point-virgule (standard FR)
+  const BOM  = '﻿';
+  const rows = [['Date', 'Libellé', 'Montant (€)', 'Compte', 'Catégorie']];
+  for (const tx of txs) {
+    const amt = (tx.direction === 'debit' ? -1 : 1) * Math.abs(parseFloat(tx.amount || 0));
+    rows.push([
+      tx.date || '',
+      (tx.label || '').replace(/"/g, '""'),
+      amt.toFixed(2).replace('.', ','),
+      (tx.account_name || '').replace(/"/g, '""'),
+      (tx.category_name || '').replace(/"/g, '""'),
+    ]);
+  }
+
+  const csv = BOM + rows.map(r => r.map(v => `"${v}"`).join(';')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `${label}_${month}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 async function openPlLineModal(poste, isRevenue) {

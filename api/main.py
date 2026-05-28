@@ -256,11 +256,13 @@ def get_pl_line(poste: str = Query(...), year: str = Query(default=None)):
 
 @app.get("/api/pl_line_transactions")
 def get_pl_line_transactions(poste: str = Query(...), year: str = Query(default=None)):
-    """Liste des transactions Pennylane sous-jacentes à un poste P&L."""
+    """Liste des transactions Pennylane sous-jacentes à un poste P&L.
+    Filtre catégories en Python (évite le bug .in_() SDK Supabase sur accents).
+    Pagination .range() pour dépasser la limite 1000 lignes.
+    """
     year = year or str(date.today().year)
     d_from, d_to = f"{year}-01-01", f"{year}-12-31"
 
-    # Trouver les catégories Pennylane correspondant à ce poste
     mapping = (
         sb.table("category_mapping")
         .select("pennylane_category_name")
@@ -270,17 +272,77 @@ def get_pl_line_transactions(poste: str = Query(...), year: str = Query(default=
     if not mapping:
         return {"poste": poste, "year": year, "data": []}
 
-    cat_names = [r["pennylane_category_name"] for r in mapping]
+    cat_set = {r["pennylane_category_name"] for r in mapping}
 
-    rows = (
-        sb.table("transactions")
-        .select("date, label, amount, direction, account_name, category_name")
-        .in_("category_name", cat_names)
-        .gte("date", d_from).lte("date", d_to)
-        .order("date", desc=False)
+    # Fetch sans .in_() ni double filtre date — pagination + filtre Python
+    rows, page, size = [], 0, 1000
+    while page < 20:
+        batch = (
+            sb.table("transactions")
+            .select("date, label, amount, direction, account_name, category_name")
+            .gte("date", d_from)
+            .order("date", desc=False)
+            .range(page * size, (page + 1) * size - 1)
+            .execute().data
+        )
+        # Filtre Python : date range + catégorie
+        relevant = [r for r in batch if r["date"] <= d_to and r.get("category_name") in cat_set]
+        rows.extend(relevant)
+        if len(batch) < size:
+            break
+        # Arrêt anticipé si toutes les lignes restantes sont après d_to
+        if batch and batch[-1]["date"] > d_to:
+            break
+        page += 1
+
+    return {"poste": poste, "year": year, "data": rows}
+
+
+@app.get("/api/debug_pl")
+def debug_pl(poste: str = Query(...), month: str = Query(...)):
+    """Diagnostic : compare pl_daily vs transactions pour un poste+mois."""
+    d_from = f"{month}-01"
+    # Fin du mois
+    y, m = int(month[:4]), int(month[5:7])
+    import calendar
+    d_to = f"{month}-{calendar.monthrange(y, m)[1]:02d}"
+
+    # pl_daily pour ce poste ce mois
+    pl_rows = (
+        sb.table("pl_daily")
+        .select("date, amount, tx_count")
+        .eq("poste_budgetaire", poste)
+        .gte("date", d_from)
         .execute().data
     )
-    return {"poste": poste, "year": year, "data": rows}
+    pl_rows = [r for r in pl_rows if r["date"] <= d_to]
+    pl_total = sum(float(r["amount"] or 0) for r in pl_rows)
+
+    # Catégories de ce poste
+    cat_mapping = sb.table("category_mapping").select("pennylane_category_name").eq("poste_budgetaire", poste).execute().data
+    cat_set = {r["pennylane_category_name"] for r in cat_mapping}
+
+    # Transactions brutes (Python filter)
+    all_txs = (
+        sb.table("transactions")
+        .select("date, label, amount, direction, category_name")
+        .gte("date", d_from)
+        .order("date")
+        .execute().data
+    )
+    tx_rows = [t for t in all_txs if t["date"] <= d_to and t.get("category_name") in cat_set]
+    tx_total = sum(
+        (1 if t["direction"] == "credit" else -1) * float(t["amount"] or 0)
+        for t in tx_rows
+    )
+
+    return {
+        "poste":      poste,
+        "month":      month,
+        "cat_names":  list(cat_set),
+        "pl_daily":   {"rows": pl_rows, "total": round(pl_total, 2)},
+        "transactions": {"count": len(tx_rows), "total": round(tx_total, 2), "rows": tx_rows},
+    }
 
 
 @app.get("/api/pl_section")

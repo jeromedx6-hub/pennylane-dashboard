@@ -322,11 +322,12 @@ def get_kpi_clients(
     date_to:   str = Query(...),
 ):
     """
-    4 segments clients (date zéro = 2026-05-01) :
+    4 segments clients :
     Nouveau client / Récurrent / Nouveau produit / Impayés
     Identification client par email extrait du libellé de transaction.
+    Historique depuis le début des données Pennylane (2026-01-01).
     """
-    DATE_ZERO = "2026-05-01"
+    DATE_HISTORY = "2026-01-01"   # début des données dispo dans Pennylane
 
     # 1. Catégories revenus
     rev_cats  = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
@@ -334,13 +335,14 @@ def get_kpi_clients(
     if not cat_names:
         return {"date_from": date_from, "date_to": date_to, "data": None}
 
-    # 2. Toutes les transactions revenue depuis DATE_ZERO (historique complet)
+    # 2. Toutes les transactions revenue depuis le début de l'historique jusqu'à la fin de la période
     all_txs = (
         sb.table("transactions")
         .select("date, label, amount, category_name, direction")
         .in_("category_name", cat_names)
         .eq("direction", "credit")
-        .gte("date", DATE_ZERO)
+        .gte("date", DATE_HISTORY)
+        .lte("date", date_to)
         .order("date")
         .execute().data
     )
@@ -353,7 +355,7 @@ def get_kpi_clients(
         tx["name"]  = _extract_name(tx.get("label", ""))
     txs_ok = [tx for tx in all_txs if tx["email"]]
 
-    # 4. Historique complet par client
+    # 4. Historique complet par client (depuis début history)
     history = defaultdict(list)
     names   = {}
     for tx in txs_ok:
@@ -364,8 +366,8 @@ def get_kpi_clients(
     # 5. Transactions dans la période
     period_txs = [tx for tx in txs_ok if date_from <= tx["date"] <= date_to]
 
-    # 6. Emails et produits vus AVANT la période (depuis DATE_ZERO)
-    before_txs      = [tx for tx in txs_ok if DATE_ZERO <= tx["date"] < date_from]
+    # 6. Emails et produits vus AVANT la période (tout l'historique antérieur)
+    before_txs      = [tx for tx in txs_ok if tx["date"] < date_from]
     emails_before   = {tx["email"] for tx in before_txs}
     products_before = defaultdict(set)
     for tx in before_txs:

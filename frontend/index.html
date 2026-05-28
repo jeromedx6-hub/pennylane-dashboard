@@ -202,71 +202,62 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   </div>
 
   <!-- Charts row -->
-  <div class="grid-3">
-    <div class="card">
-      <div class="card-header">
-        <div>
-          <div class="card-title">Décomposition CA mensuelle</div>
-          <div class="card-sub">CA = coûts + marge</div>
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Décomposition CA mensuelle</div>
+        <div class="card-sub">CA = coûts + marge</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <!-- Combo mois -->
+        <select id="evol-period" onchange="onEvolPeriodChange()" style="background:#12141e;border:1px solid #2d3148;border-radius:6px;color:#94a3b8;padding:5px 10px;font-size:11px;cursor:pointer">
+          <option value="12">12 derniers mois</option>
+          <option value="6">6 derniers mois</option>
+          <option value="3">3 derniers mois</option>
+          <option value="year-2026">2026</option>
+          <option value="year-2025">2025</option>
+        </select>
+        <!-- Toggle €/% -->
+        <div style="display:flex;background:#12141e;border:1px solid #2d3148;border-radius:6px;overflow:hidden">
+          <button id="btn-eur" onclick="setEvolMode('eur')" style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:#6366f1;color:#fff">€</button>
+          <button id="btn-pct" onclick="setEvolMode('pct')" style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:transparent;color:#475569">%</button>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <!-- Combo mois -->
-          <select id="evol-period" onchange="onEvolPeriodChange()" style="background:#12141e;border:1px solid #2d3148;border-radius:6px;color:#94a3b8;padding:5px 10px;font-size:11px;cursor:pointer">
-            <option value="12">12 derniers mois</option>
-            <option value="6">6 derniers mois</option>
-            <option value="3">3 derniers mois</option>
-            <option value="year-2026">2026</option>
-            <option value="year-2025">2025</option>
-          </select>
-          <!-- Toggle €/% -->
-          <div style="display:flex;background:#12141e;border:1px solid #2d3148;border-radius:6px;overflow:hidden">
-            <button id="btn-eur" onclick="setEvolMode('eur')" style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:#6366f1;color:#fff">€</button>
-            <button id="btn-pct" onclick="setEvolMode('pct')" style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:transparent;color:#475569">%</button>
-          </div>
-          <!-- Légende -->
-          <div class="legend" style="gap:10px">
-            <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Acq.</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Sales</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#14b8a6"></div>Ops</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>Structure</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>Marge</div>
-          </div>
+        <!-- Légende -->
+        <div class="legend" style="gap:10px">
+          <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Acq.</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Sales</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#14b8a6"></div>Ops</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>Structure</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>Marge</div>
         </div>
       </div>
-      <canvas id="chart-evolution" height="190"></canvas>
     </div>
-
-    <div class="card">
-      <div class="card-header"><div><div class="card-title">Répartition charges</div><div class="card-sub" id="charges-sub">Ce mois</div></div></div>
-      <canvas id="chart-donut" height="160"></canvas>
-      <div id="charges-bars" style="margin-top:12px"></div>
-    </div>
+    <canvas id="chart-evolution" height="120"></canvas>
   </div>
 
-  <!-- P&L + Ratios -->
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-header">
-        <div><div class="card-title">P&L Analytique · Synthèse</div><div class="card-sub" id="pl-sub">Ce mois</div></div>
-        <div class="tabs">
-          <button class="tab active" onclick="switchPL('month',this)">Mois</button>
-          <button class="tab" onclick="switchPL('ytd',this)">YTD</button>
-        </div>
+  <!-- P&L pleine largeur -->
+  <div class="card">
+    <div class="card-header">
+      <div><div class="card-title">P&L Analytique · Synthèse</div><div class="card-sub" id="pl-sub">Ce mois</div></div>
+      <div class="tabs">
+        <button class="tab active" onclick="switchPL('month',this)">Mois</button>
+        <button class="tab" onclick="switchPL('ytd',this)">YTD</button>
       </div>
-      <table class="pl-table" id="pl-table">
-        <thead><tr><th style="width:45%">Poste</th><th>Réalisé</th><th>% CA</th></tr></thead>
-        <tbody id="pl-body"></tbody>
-      </table>
     </div>
+    <table class="pl-table" id="pl-table">
+      <thead><tr><th style="width:45%">Poste</th><th>Réalisé</th><th>% CA</th></tr></thead>
+      <tbody id="pl-body"></tbody>
+    </table>
+  </div>
 
-    <div class="card">
-      <div class="card-header"><div class="card-title">Ratios & KPIs</div><div class="card-sub" id="ratios-sub">Ce mois</div></div>
-      <div class="ratio-grid" id="ratio-grid"></div>
-      <div style="border-top:1px solid #2d3148;padding-top:14px">
-        <div class="card-title" style="margin-bottom:10px;font-size:12px">CA par produit</div>
-        <div id="ca-bars"></div>
-      </div>
-    </div>
+  <!-- Éléments cachés mais nécessaires au JS -->
+  <div style="display:none">
+    <canvas id="chart-donut"></canvas>
+    <div id="charges-bars"></div>
+    <div id="charges-sub"></div>
+    <div id="ratio-grid"></div>
+    <div id="ca-bars"></div>
+    <div id="ratios-sub"></div>
   </div>
 
 </div><!-- /main -->

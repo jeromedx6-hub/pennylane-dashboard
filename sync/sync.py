@@ -67,11 +67,17 @@ def normalize_transaction(tx):
     amount    = float(tx.get("currency_amount") or tx.get("amount") or 0)
     direction = "credit" if amount >= 0 else "debit"
 
-    # Catégorie principale (weight la plus haute si plusieurs)
+    # Familles à ignorer pour le P&L (cash-flow / technique)
+    EXCLUDED_FAMILIES = {"Suivi de trésorerie", "TVA", "Transfert interne", "Test", "Test 156"}
+
+    # Catégorie principale : poids le plus élevé HORS familles exclues
+    # Si toutes les catégories sont exclues, on prend quand même la première (fallback)
     cats = tx.get("categories") or []
     if cats:
-        cats_sorted   = sorted(cats, key=lambda c: float(c.get("weight", 0)), reverse=True)
-        cat           = cats_sorted[0]
+        cats_sorted = sorted(cats, key=lambda c: float(c.get("weight", 0)), reverse=True)
+        preferred   = [c for c in cats_sorted
+                       if (c.get("category_group") or {}).get("label", "") not in EXCLUDED_FAMILIES]
+        cat           = preferred[0] if preferred else cats_sorted[0]
         category_name = cat.get("label", "")
         category_id   = str(cat.get("id", ""))
         family_id     = str((cat.get("category_group") or {}).get("id", ""))

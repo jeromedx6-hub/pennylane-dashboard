@@ -39,23 +39,50 @@ def pl_get_transactions(token, date_from, date_to):
     return rows
 
 
+def pl_get_modified_since(token, since_dt):
+    """
+    Récupère TOUTES les transactions modifiées depuis since_dt via updated_at_gte.
+    Attrape les recatégorisations rétroactives quelle que soit la date de la transaction.
+    """
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params  = {"per_page": 100, "updated_at_gte": since_dt.strftime("%Y-%m-%dT%H:%M:%SZ")}
+    rows = []
+    while True:
+        r = requests.get(f"{BASE_URL}/transactions", headers=headers, params=params)
+        r.raise_for_status()
+        data = r.json()
+        rows.extend(data.get("items", []))
+        if not data.get("has_more"):
+            break
+        params["cursor"] = data["next_cursor"]
+        time.sleep(0.26)
+    log.info(f"  pl_get_modified_since({since_dt.date()}): {len(rows)} transactions modifiées")
+    return rows
+
+
 # ── Normalisation ──────────────────────────────────────────────────────────
 
 def normalize_transaction(tx):
-    """Convertit une transaction Pennylane en ligne Supabase."""
-    amount = float(tx.get("currency_amount") or tx.get("amount") or 0)
+    """Convertit une transaction Pennylane en ligne Supabase (champs étendus)."""
+    amount    = float(tx.get("currency_amount") or tx.get("amount") or 0)
     direction = "credit" if amount >= 0 else "debit"
 
-    # Première catégorie (weight la plus haute si plusieurs)
+    # Catégorie principale (weight la plus haute si plusieurs)
     cats = tx.get("categories") or []
     if cats:
-        cats_sorted = sorted(cats, key=lambda c: float(c.get("weight", 0)), reverse=True)
-        cat = cats_sorted[0]
+        cats_sorted   = sorted(cats, key=lambda c: float(c.get("weight", 0)), reverse=True)
+        cat           = cats_sorted[0]
         category_name = cat.get("label", "")
         category_id   = str(cat.get("id", ""))
+        family_id     = str((cat.get("category_group") or {}).get("id", ""))
     else:
         category_name = ""
         category_id   = ""
+        family_id     = ""
+
+    # Tiers (client ou fournisseur si disponible)
+    third_party      = tx.get("customer") or tx.get("supplier") or {}
+    third_party_name = third_party.get("name", "") if isinstance(third_party, dict) else ""
 
     return {
         "id":            f"tx_{tx['id']}",
@@ -70,6 +97,10 @@ def normalize_transaction(tx):
         "account_name":  "",
         "source_type":   "transaction",
         "source_id":     str(tx["id"]),
+        # Champs étendus (miroir Pennylane)
+        "updated_at_pl": tx.get("updated_at", ""),
+        "third_party":   third_party_name,
+        "family_id":     family_id,
     }
 
 
@@ -337,6 +368,134 @@ def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
             "auto_fixed": auto_fixed}
 
 
+# ── Release notes ────────────────────────────────────────────────────────
+
+def write_release_note(sb, category, title, description="", impact="low", details=None):
+    """Écrit une entrée dans la table release_notes (changelog du superviseur)."""
+    try:
+        sb.table("release_notes").insert({
+            "released_at": _dt.utcnow().isoformat() + "Z",
+            "category":    category,   # 'new_category' | 'sync_fix' | 'mapping' | 'feature'
+            "title":       title,
+            "description": description,
+            "impact":      impact,     # 'high' | 'medium' | 'low'
+            "details":     details or {},
+        }).execute()
+    except Exception as e:
+        log.warning(f"  write_release_note failed: {e}")
+
+
+# ── Miroir catégories Pennylane ───────────────────────────────────────────
+
+def sync_pennylane_categories(token, sb, mapping):
+    """
+    Miroir complet des familles + catégories Pennylane → table pennylane_categories.
+    - Détecte les nouvelles catégories non encore mappées dans FinBoard
+    - Écrit une release note (impact high) si nouvelles catégories trouvées
+    - Ignore les familles sans intérêt comptable (Suivi de trésorerie, Test, TVA…)
+    """
+    IGNORED_FAMILIES = {"Suivi de trésorerie", "Test", "Test 156",
+                        "Transfert interne", "TVA"}
+
+    log.info("Sync miroir catégories Pennylane…")
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+    # Familles (category_groups)
+    groups, params = [], {"per_page": 100}
+    while True:
+        r = requests.get(f"{BASE_URL}/category_groups", headers=headers, params=params)
+        r.raise_for_status()
+        data = r.json()
+        groups.extend(data.get("items", []))
+        if not data.get("has_more"): break
+        params["cursor"] = data["next_cursor"]
+        time.sleep(0.26)
+    group_map = {g["id"]: g["label"] for g in groups}
+
+    # Catégories
+    cats, params = [], {"per_page": 100}
+    while True:
+        r = requests.get(f"{BASE_URL}/categories", headers=headers, params=params)
+        r.raise_for_status()
+        data = r.json()
+        cats.extend(data.get("items", []))
+        if not data.get("has_more"): break
+        params["cursor"] = data["next_cursor"]
+        time.sleep(0.26)
+
+    log.info(f"  {len(cats)} catégories / {len(groups)} familles récupérées")
+
+    # IDs déjà connus dans Supabase
+    try:
+        existing = {r["id"]: r for r in
+                    sb.table("pennylane_categories").select("id,label,is_mapped").execute().data}
+    except Exception:
+        existing = {}
+
+    now_str        = _dt.utcnow().isoformat() + "Z"
+    rows_to_upsert = []
+    newly_unmapped = []   # nouvelles catégories non mappées (jamais vues)
+
+    for cat in cats:
+        gid          = (cat.get("category_group") or {}).get("id")
+        family_label = group_map.get(gid, "")
+        is_mapped    = (cat["label"] in mapping
+                        and mapping[cat["label"]].get("pl_section") is not None)
+        mapped_to    = (mapping[cat["label"]]["poste_budgetaire"]
+                        if is_mapped else None)
+        is_new       = cat["id"] not in existing
+
+        row = {
+            "id":              cat["id"],
+            "label":           cat["label"],
+            "family_id":       gid,
+            "family_label":    family_label,
+            "analytical_code": cat.get("analytical_code"),
+            "last_seen":       now_str,
+            "is_mapped":       is_mapped,
+            "mapped_to_poste": mapped_to,
+        }
+        if is_new:
+            row["first_seen"] = now_str
+
+        rows_to_upsert.append(row)
+
+        if is_new and not is_mapped and family_label not in IGNORED_FAMILIES:
+            newly_unmapped.append({
+                "id":     cat["id"],
+                "label":  cat["label"],
+                "family": family_label,
+            })
+
+    if rows_to_upsert:
+        sb.table("pennylane_categories").upsert(rows_to_upsert, on_conflict="id").execute()
+
+    # Release note si nouvelles catégories non mappées
+    if newly_unmapped:
+        log.warning(f"  ⚠️  {len(newly_unmapped)} nouvelle(s) catégorie(s) non mappée(s)")
+        for c in newly_unmapped:
+            log.warning(f"    → '{c['label']}' (famille: {c['family']})")
+        families = list(set(c["family"] for c in newly_unmapped))
+        write_release_note(
+            sb,
+            category="new_category",
+            title=f"{len(newly_unmapped)} nouvelle(s) catégorie(s) Pennylane sans mapping P&L",
+            description=(f"Familles : {', '.join(families)}. "
+                         "Ces transactions seront ignorées du P&L jusqu'au mapping."),
+            impact="high" if len(newly_unmapped) > 2 else "medium",
+            details={"categories": newly_unmapped},
+        )
+
+    total_unmapped = sum(1 for c in cats
+                        if not (c["label"] in mapping
+                                and mapping[c["label"]].get("pl_section") is not None)
+                        and group_map.get((c.get("category_group") or {}).get("id"), "")
+                        not in IGNORED_FAMILIES)
+    log.info(f"  Miroir OK — {len(cats)} catégories, "
+             f"{total_unmapped} sans mapping, {len(newly_unmapped)} nouvelles")
+    return {"total": len(cats), "unmapped": total_unmapped, "new": len(newly_unmapped)}
+
+
 # ── Customer invoices ─────────────────────────────────────────────────────
 
 def sync_customer_invoices(token, sb, date_from, date_to):
@@ -390,32 +549,89 @@ def run(date_from=None, date_to=None):
     log.info(f"Sync {date_from} → {date_to}")
 
     sb      = create_client(SUPABASE_URL, SUPABASE_KEY)
-    mapping = {r["pennylane_category_name"]: r for r in sb.table("category_mapping").select("*").execute().data}
+    mapping = {r["pennylane_category_name"]: r
+               for r in sb.table("category_mapping").select("*").execute().data}
     log.info(f"Mapping : {len(mapping)} catégories chargées")
 
-    log.info("Récupération transactions Pennylane…")
+    # ── 1. Récupération du dernier sync (pour updated_at_gte) ─────────────
+    try:
+        meta = sb.table("sync_meta").select("value").eq("key", "last_synced_at").execute().data
+        last_synced_at = _dt.fromisoformat(meta[0]["value"].rstrip("Z")) if meta else None
+    except Exception:
+        last_synced_at = None
+
+    # ── 2. Transactions par fenêtre de dates (nouvelles) ──────────────────
+    log.info("Récupération transactions Pennylane (date range)…")
     transactions = pl_get_transactions(PENNYLANE_TOKEN, date_from, date_to)
-    log.info(f"  {len(transactions)} transactions récupérées")
+    log.info(f"  {len(transactions)} transactions dans la fenêtre")
 
-    rows = [normalize_transaction(tx) for tx in transactions]
-    rows = [r for r in rows if r]
+    # ── 3. Transactions modifiées depuis le dernier sync ──────────────────
+    #    (recatégorisations rétroactives, peu importe la date de la transaction)
+    modified_txs = []
+    if last_synced_at:
+        modified_txs = pl_get_modified_since(PENNYLANE_TOKEN, last_synced_at)
+        if modified_txs:
+            # Fusionner : les tx modifiées prennent la priorité (version la plus à jour)
+            tx_by_id = {tx["id"]: tx for tx in transactions}
+            for tx in modified_txs:
+                tx_by_id[tx["id"]] = tx
+            transactions = list(tx_by_id.values())
+            log.info(f"  Après fusion : {len(transactions)} transactions uniques")
 
+    # ── 4. Normalisation + upsert Supabase ────────────────────────────────
+    rows = [r for r in (normalize_transaction(tx) for tx in transactions) if r]
     if rows:
         sb.table("transactions").upsert(rows, on_conflict="id").execute()
         log.info(f"  {len(rows)} transactions upsertées dans Supabase")
 
+    # ── 5. P&L + KPIs : fenêtre + dates des tx modifiées ─────────────────
+    dates_to_compute = set()
     current = date_from
     while current <= date_to:
-        compute_pl_daily(sb, mapping, current)
-        compute_kpis(sb, current)
+        dates_to_compute.add(current)
         current += timedelta(days=1)
+    for tx in modified_txs:                          # dates hors fenêtre
+        try:
+            dates_to_compute.add(date.fromisoformat(tx["date"]))
+        except Exception:
+            pass
 
+    for d in sorted(dates_to_compute):
+        compute_pl_daily(sb, mapping, d)
+        compute_kpis(sb, d)
+
+    # ── 6. Customer invoices ──────────────────────────────────────────────
     sync_customer_invoices(PENNYLANE_TOKEN, sb, date_from, date_to)
 
-    # Réconciliation hybride : vérifie la cohérence Pennylane ↔ Supabase
-    # Réutilise les transactions déjà fetchées → 0 appel API supplémentaire
+    # ── 7. Miroir catégories + détection nouvelles familles/catégories ────
+    sync_pennylane_categories(PENNYLANE_TOKEN, sb, mapping)
+
+    # ── 8. Réconciliation hybride (volume + recatégorisations) ────────────
     audit = verify_sync(PENNYLANE_TOKEN, sb, date_from, date_to,
                         pl_transactions=transactions)
+
+    # ── 9. Release note si tx modifiées hors fenêtre ──────────────────────
+    extra_dates = sorted(d for d in dates_to_compute
+                         if d < date_from or d > date_to)
+    if extra_dates:
+        write_release_note(
+            sb,
+            category="sync_fix",
+            title=f"{len(modified_txs)} transaction(s) recatégorisée(s) resyncées",
+            description=(f"Dates hors fenêtre retraitées : {', '.join(d.isoformat() for d in extra_dates[:10])}"),
+            impact="medium" if len(modified_txs) > 5 else "low",
+            details={"modified_count": len(modified_txs),
+                     "extra_dates": [d.isoformat() for d in extra_dates]},
+        )
+
+    # ── 10. Mise à jour last_synced_at ────────────────────────────────────
+    try:
+        sb.table("sync_meta").upsert(
+            {"key": "last_synced_at", "value": _dt.utcnow().isoformat() + "Z"},
+            on_conflict="key"
+        ).execute()
+    except Exception as e:
+        log.warning(f"  sync_meta update failed: {e}")
 
     log.info("✅ Sync terminé.")
     return audit

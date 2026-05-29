@@ -715,6 +715,123 @@ def get_sync_status():
     return _sync_state
 
 
+@app.get("/api/alerts")
+def get_alerts(days: int = Query(default=30)):
+    """
+    Tableau de bord des alertes :
+      - Transactions sans mapping P&L (invisibles dans le superviseur)
+      - Nouvelles catégories Pennylane non intégrées
+      - Recatégorisations récentes détectées lors des syncs
+    """
+    today  = date.today()
+    d_from = (today - timedelta(days=days)).isoformat()
+
+    # 1. Catégories mappées avec section P&L
+    mapping_data = (sb.table("category_mapping")
+                    .select("pennylane_category_name,pl_section,poste_budgetaire")
+                    .execute().data)
+    mapped_cats = {r["pennylane_category_name"]
+                   for r in mapping_data if r.get("pl_section")}
+
+    # 2. Transactions récentes sans mapping P&L (pagination)
+    tx_rows, page, size = [], 0, 1000
+    while page < 5:
+        batch = (sb.table("transactions")
+                 .select("date, label, amount, direction, category_name, id")
+                 .gte("date", d_from)
+                 .order("date", desc=True)
+                 .range(page * size, (page + 1) * size - 1)
+                 .execute().data)
+        tx_rows.extend(batch)
+        if len(batch) < size:
+            break
+        page += 1
+
+    unmapped_txs = [t for t in tx_rows
+                    if not t.get("category_name")
+                    or t["category_name"] not in mapped_cats]
+
+    # Grouper par catégorie pour synthèse
+    by_cat = defaultdict(lambda: {"count": 0, "total": 0.0,
+                                   "sample": "", "last_date": ""})
+    for t in unmapped_txs:
+        cat = t.get("category_name") or "(aucune catégorie)"
+        by_cat[cat]["count"] += 1
+        by_cat[cat]["total"] += float(t["amount"] or 0)
+        if not by_cat[cat]["sample"] and t.get("label"):
+            by_cat[cat]["sample"] = t["label"][:60]
+        if t["date"] > by_cat[cat]["last_date"]:
+            by_cat[cat]["last_date"] = t["date"]
+
+    unmapped_summary = sorted(
+        [{"category": cat, "count": v["count"],
+          "total": round(v["total"], 2), "sample": v["sample"],
+          "last_date": v["last_date"]}
+         for cat, v in by_cat.items()],
+        key=lambda x: -x["total"]
+    )
+
+    # 3. Nouvelles catégories Pennylane non mappées
+    try:
+        new_cats = (sb.table("pennylane_categories")
+                    .select("id,label,family_label,first_seen")
+                    .eq("is_mapped", False)
+                    .order("first_seen", desc=True)
+                    .limit(50)
+                    .execute().data)
+        # Exclure familles sans intérêt comptable
+        IGNORED = {"Suivi de trésorerie", "Test", "Test 156",
+                   "Transfert interne", "TVA"}
+        new_cats = [c for c in new_cats
+                    if c.get("family_label") not in IGNORED]
+    except Exception:
+        new_cats = []
+
+    # 4. Recatégorisations récentes (sync_audit.cat_changes)
+    try:
+        recent_audits = (sb.table("sync_audit")
+                         .select("checked_at, cat_changes, summary")
+                         .order("checked_at", desc=True)
+                         .limit(20)
+                         .execute().data)
+        recent_changes = []
+        for audit in recent_audits:
+            for c in (audit.get("cat_changes") or []):
+                recent_changes.append({**c, "detected_at": audit["checked_at"]})
+    except Exception:
+        recent_changes = []
+
+    return {
+        "total_alerts": len(unmapped_txs) + len(new_cats),
+        "unmapped_transactions": {
+            "count":       len(unmapped_txs),
+            "by_category": unmapped_summary[:30],
+        },
+        "unmapped_categories": {
+            "count": len(new_cats),
+            "data":  new_cats,
+        },
+        "cat_changes": {
+            "count": len(recent_changes),
+            "data":  recent_changes[:30],
+        },
+    }
+
+
+@app.get("/api/release_notes")
+def get_release_notes(limit: int = Query(default=50, le=100)):
+    """Historique des mises à jour du superviseur (changelog automatique)."""
+    try:
+        rows = (sb.table("release_notes")
+                .select("*")
+                .order("released_at", desc=True)
+                .limit(limit)
+                .execute().data)
+        return {"data": rows}
+    except Exception as e:
+        return {"data": [], "error": str(e)}
+
+
 @app.get("/api/sync_audit")
 def get_sync_audit(limit: int = Query(default=10, le=50)):
     """

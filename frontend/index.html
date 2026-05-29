@@ -151,6 +151,52 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 ::-webkit-scrollbar { width:5px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:#2d3148; border-radius:3px; }
+
+/* ── Alert nav badge ─────────────────────────────────────── */
+.alert-nav-badge { display:inline-flex; align-items:center; justify-content:center; background:#ef4444; color:#fff; font-size:9px; font-weight:700; border-radius:10px; padding:1px 6px; margin-left:auto; min-width:18px; line-height:1.4; }
+
+/* ── Alert cards ─────────────────────────────────────────── */
+.alert-card { background:#12141e; border:1px solid #2d3148; border-radius:10px; padding:14px 16px; margin-bottom:8px; display:flex; align-items:flex-start; gap:12px; transition:border-color .15s; }
+.alert-card:hover { border-color:#4b5563; }
+.alert-card.lvl-high   { border-left:3px solid #ef4444; }
+.alert-card.lvl-medium { border-left:3px solid #fb923c; }
+.alert-card.lvl-low    { border-left:3px solid #6366f1; }
+.alert-icon { width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0; }
+.alert-icon.red    { background:rgba(239,68,68,.12); }
+.alert-icon.orange { background:rgba(251,146,60,.12); }
+.alert-icon.indigo { background:rgba(99,102,241,.12); }
+.alert-content { flex:1; min-width:0; }
+.alert-title { font-size:13px; font-weight:600; color:#e2e8f0; margin-bottom:2px; }
+.alert-meta  { font-size:11px; color:#475569; margin-bottom:6px; }
+.alert-chips { display:flex; gap:5px; flex-wrap:wrap; }
+.alert-chip  { font-size:10px; padding:2px 8px; border-radius:4px; background:#1a1d27; border:1px solid #2d3148; color:#94a3b8; }
+.alert-amount { font-size:12px; font-weight:600; color:#f87171; white-space:nowrap; flex-shrink:0; margin-left:4px; }
+
+/* ── Release notes timeline ──────────────────────────────── */
+.rn-timeline { position:relative; padding-left:26px; }
+.rn-timeline::before { content:''; position:absolute; left:8px; top:6px; bottom:6px; width:2px; background:#2d3148; border-radius:1px; }
+.rn-item { position:relative; margin-bottom:18px; }
+.rn-dot { position:absolute; left:-22px; top:5px; width:10px; height:10px; border-radius:50%; border:2px solid #0f1117; flex-shrink:0; }
+.rn-dot.high   { background:#ef4444; }
+.rn-dot.medium { background:#fb923c; }
+.rn-dot.low    { background:#6366f1; }
+.rn-dot.info   { background:#22c55e; }
+.rn-card { background:#1a1d27; border:1px solid #2d3148; border-radius:10px; padding:14px 16px; transition:border-color .15s; }
+.rn-card:hover { border-color:#4b5563; }
+.rn-header { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:6px; }
+.rn-title  { font-size:13px; font-weight:600; color:#e2e8f0; }
+.rn-date   { font-size:10px; color:#475569; white-space:nowrap; flex-shrink:0; padding-top:2px; }
+.rn-cat-tag { font-size:10px; font-weight:600; padding:2px 8px; border-radius:4px; margin-bottom:8px; display:inline-block; }
+.rn-cat-tag.sync             { background:rgba(99,102,241,.15); color:#a78bfa; }
+.rn-cat-tag.categories       { background:rgba(251,146,60,.15); color:#fb923c; }
+.rn-cat-tag.transactions     { background:rgba(239,68,68,.15); color:#f87171; }
+.rn-cat-tag.recategorization { background:rgba(34,197,94,.15); color:#4ade80; }
+.rn-cat-tag.system           { background:rgba(100,116,139,.15); color:#94a3b8; }
+.rn-description { font-size:12px; color:#64748b; line-height:1.5; }
+.rn-impact-tag { font-size:10px; font-weight:600; padding:1px 7px; border-radius:3px; display:inline-block; margin-top:8px; }
+.rn-impact-tag.high   { background:rgba(239,68,68,.1); color:#f87171; }
+.rn-impact-tag.medium { background:rgba(251,146,60,.1); color:#fb923c; }
+.rn-impact-tag.low    { background:rgba(99,102,241,.1); color:#a78bfa; }
 </style>
 </head>
 <body>
@@ -161,6 +207,12 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="nav-label">Analyse</div>
   <div class="nav-item active" onclick="showPage('indicateurs', this)">⬡ &nbsp;Indicateurs</div>
   <div class="nav-item" onclick="showPage('kpi', this)">◈ &nbsp;KPI Clients</div>
+  <div class="nav-label">Supervision</div>
+  <div class="nav-item" onclick="showPage('alertes', this)" id="nav-alertes" style="justify-content:space-between">
+    <span>⚠ &nbsp;Alertes</span>
+    <span id="alert-badge" class="alert-nav-badge" style="display:none">0</span>
+  </div>
+  <div class="nav-item" onclick="showPage('release', this)">📋 &nbsp;Release Notes</div>
   <div class="sidebar-bottom">
     <div class="client-badge">
       <strong id="client-name">Dashboard Financier</strong>
@@ -315,6 +367,88 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   </div>
 
 </div><!-- /page-kpi -->
+
+<!-- ════ PAGE : ALERTES ════════════════════════════════════ -->
+<div id="page-alertes" class="page" style="display:none">
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">Alertes <span>Superviseur</span></div>
+      <div class="header-sub">Transactions non catégorisées · Nouvelles catégories · Recatégorisations</div>
+    </div>
+    <div class="header-right">
+      <select id="alerts-days" onchange="loadAlerts()"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none">
+        <option value="7">7 derniers jours</option>
+        <option value="30" selected>30 derniers jours</option>
+        <option value="90">90 derniers jours</option>
+        <option value="180">6 derniers mois</option>
+      </select>
+      <div class="sync-badge"><div class="dot"></div><span id="alerts-sync-time">Chargement…</span></div>
+      <button class="sync-btn" onclick="loadAlerts()">⟳ Rafraîchir</button>
+    </div>
+  </div>
+
+  <!-- KPI cards résumé -->
+  <div id="alerts-kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
+    <div class="kpi-card red">   <div class="kpi-label">Transactions non mappées</div><div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div></div>
+    <div class="kpi-card orange"><div class="kpi-label">Catégories non mappées</div> <div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div></div>
+    <div class="kpi-card blue">  <div class="kpi-label">Recatégorisations</div>       <div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div></div>
+  </div>
+
+  <!-- Section 1 : transactions non mappées -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-header">
+      <div>
+        <div class="card-title">⚠ Transactions sans poste P&L</div>
+        <div class="card-sub">Catégories Pennylane présentes dans les transactions mais absentes du mapping superviseur</div>
+      </div>
+    </div>
+    <div id="unmapped-tx-body"><div style="color:#475569;text-align:center;padding:30px">Chargement…</div></div>
+  </div>
+
+  <!-- Section 2 : catégories non mappées -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-header">
+      <div>
+        <div class="card-title">🆕 Nouvelles catégories Pennylane non mappées</div>
+        <div class="card-sub">Catégories détectées lors du dernier sync mais absentes du superviseur</div>
+      </div>
+    </div>
+    <div id="unmapped-cats-body"><div style="color:#475569;text-align:center;padding:30px">Chargement…</div></div>
+  </div>
+
+  <!-- Section 3 : recatégorisations -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">🔄 Recatégorisations détectées</div>
+        <div class="card-sub">Transactions dont la catégorie Pennylane a été modifiée a posteriori</div>
+      </div>
+    </div>
+    <div id="cat-changes-body"><div style="color:#475569;text-align:center;padding:30px">Chargement…</div></div>
+  </div>
+
+</div><!-- /page-alertes -->
+
+<!-- ════ PAGE : RELEASE NOTES ══════════════════════════════ -->
+<div id="page-release" class="page" style="display:none">
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">Release <span>Notes</span></div>
+      <div class="header-sub">Historique des changements détectés et mises à jour du superviseur</div>
+    </div>
+    <div class="header-right">
+      <button class="sync-btn" onclick="loadReleaseNotes()">⟳ Rafraîchir</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="release-notes-body"><div style="color:#475569;text-align:center;padding:40px">Chargement…</div></div>
+  </div>
+
+</div><!-- /page-release -->
 
 </div><!-- /main -->
 
@@ -1173,7 +1307,165 @@ function showPage(page, el) {
   document.getElementById('page-' + page).style.display = '';
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
-  if (page === 'kpi' && !kpiState.date_from) initKpiPage();
+  if (page === 'kpi'     && !kpiState.date_from) initKpiPage();
+  if (page === 'alertes') loadAlerts();
+  if (page === 'release') loadReleaseNotes();
+}
+
+// ── Alertes ───────────────────────────────────────────────────
+async function loadAlerts() {
+  const days = (document.getElementById('alerts-days')?.value) || 30;
+  try {
+    const res  = await fetch(`${API}/api/alerts?days=${days}`);
+    const json = await res.json();
+    renderAlerts(json);
+    // Badge sidebar
+    const total = json.total_alerts || 0;
+    const badge = document.getElementById('alert-badge');
+    if (badge) { badge.textContent = total; badge.style.display = total > 0 ? '' : 'none'; }
+    const lbl = document.getElementById('alerts-sync-time');
+    if (lbl) lbl.textContent = `${total} alerte${total>1?'s':''} · ${new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}`;
+  } catch(e) {
+    console.error('loadAlerts error', e);
+  }
+}
+
+function renderAlerts(json) {
+  const unmappedTx   = json.unmapped_transactions || [];
+  const unmappedCats = json.unmapped_categories   || [];
+  const catChanges   = json.cat_changes            || [];
+
+  // KPI row
+  const kpiRow = document.getElementById('alerts-kpi-row');
+  if (kpiRow) kpiRow.innerHTML = `
+    <div class="kpi-card ${unmappedTx.length>0?'red':'green'}">
+      <div class="kpi-label">Transactions non mappées</div>
+      <div class="kpi-value">${unmappedTx.length}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:${unmappedTx.length>0?'#f87171':'#4ade80'}">${unmappedTx.length>0?'⚠ Action requise':'✓ Aucun problème'}</span></div>
+    </div>
+    <div class="kpi-card ${unmappedCats.length>0?'orange':'green'}">
+      <div class="kpi-label">Catégories non mappées</div>
+      <div class="kpi-value">${unmappedCats.length}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:${unmappedCats.length>0?'#fb923c':'#4ade80'}">${unmappedCats.length>0?'⚠ À mapper':'✓ Tout mappé'}</span></div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">Recatégorisations</div>
+      <div class="kpi-value">${catChanges.length}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:#60a5fa">${catChanges.length>0?'🔄 Mises à jour détectées':'✓ Aucun changement'}</span></div>
+    </div>`;
+
+  // Section 1 — transactions non mappées
+  const txBody = document.getElementById('unmapped-tx-body');
+  if (txBody) {
+    if (!unmappedTx.length) {
+      txBody.innerHTML = `<div style="text-align:center;padding:30px;color:#4ade80;font-size:13px">✓ Toutes les transactions récentes sont mappées dans le P&amp;L</div>`;
+    } else {
+      txBody.innerHTML = unmappedTx.map(tx => `
+        <div class="alert-card lvl-high">
+          <div class="alert-icon red">⚠</div>
+          <div class="alert-content">
+            <div class="alert-title">${tx.category_name || '(Sans catégorie)'}</div>
+            <div class="alert-meta">${tx.count} transaction${tx.count>1?'s':''} · Dernière : ${tx.last_date||'—'}</div>
+            <div class="alert-chips">
+              ${tx.family_name ? `<span class="alert-chip">Famille : ${tx.family_name}</span>` : ''}
+              ${tx.sample_label ? `<span class="alert-chip">Ex : ${tx.sample_label.slice(0,45)}${tx.sample_label.length>45?'…':''}</span>` : ''}
+            </div>
+          </div>
+          <div class="alert-amount">— ${fmtEur(Math.abs(tx.total_amount||0))}</div>
+        </div>`).join('');
+    }
+  }
+
+  // Section 2 — catégories non mappées
+  const catsBody = document.getElementById('unmapped-cats-body');
+  if (catsBody) {
+    if (!unmappedCats.length) {
+      catsBody.innerHTML = `<div style="text-align:center;padding:30px;color:#4ade80;font-size:13px">✓ Toutes les catégories Pennylane sont mappées</div>`;
+    } else {
+      catsBody.innerHTML = unmappedCats.map(cat => `
+        <div class="alert-card lvl-medium">
+          <div class="alert-icon orange">🆕</div>
+          <div class="alert-content">
+            <div class="alert-title">${cat.label}</div>
+            <div class="alert-meta">Famille : ${cat.family_label||'N/A'} · Première détection : ${cat.first_seen ? cat.first_seen.slice(0,10) : '—'}</div>
+            <div class="alert-chips">
+              <span class="alert-chip" style="background:rgba(251,146,60,.08);border-color:rgba(251,146,60,.3);color:#fb923c">Non mappée dans le P&amp;L</span>
+            </div>
+          </div>
+        </div>`).join('');
+    }
+  }
+
+  // Section 3 — recatégorisations
+  const changesBody = document.getElementById('cat-changes-body');
+  if (changesBody) {
+    if (!catChanges.length) {
+      changesBody.innerHTML = `<div style="text-align:center;padding:30px;color:#4ade80;font-size:13px">✓ Aucune recatégorisation détectée</div>`;
+    } else {
+      changesBody.innerHTML = catChanges.map(ch => `
+        <div class="alert-card lvl-low">
+          <div class="alert-icon indigo">🔄</div>
+          <div class="alert-content">
+            <div class="alert-title">${ch.tx_label || ch.source_id || '—'}</div>
+            <div class="alert-meta">Transaction du ${ch.tx_date||'—'} · Détectée le ${ch.detected_at ? ch.detected_at.slice(0,10) : '—'}</div>
+            <div class="alert-chips">
+              <span class="alert-chip" style="color:#f87171">Avant : ${ch.old_category||'—'}</span>
+              <span style="color:#475569;font-size:12px;padding:0 2px">→</span>
+              <span class="alert-chip" style="color:#4ade80">Après : ${ch.new_category||'—'}</span>
+            </div>
+          </div>
+          <div class="alert-amount" style="color:#a78bfa">${ch.amount ? fmtEur(Math.abs(ch.amount)) : '—'}</div>
+        </div>`).join('');
+    }
+  }
+}
+
+// ── Release Notes ─────────────────────────────────────────────
+async function loadReleaseNotes() {
+  try {
+    const res  = await fetch(`${API}/api/release_notes?limit=50`);
+    const json = await res.json();
+    renderReleaseNotes(json.data || []);
+  } catch(e) {
+    console.error('loadReleaseNotes error', e);
+  }
+}
+
+function renderReleaseNotes(notes) {
+  const body = document.getElementById('release-notes-body');
+  if (!body) return;
+  if (!notes.length) {
+    body.innerHTML = `<div style="text-align:center;padding:40px;color:#475569;font-size:13px">Aucune release note disponible — les changements apparaîtront ici après le prochain sync</div>`;
+    return;
+  }
+
+  const catClass = c => ['sync','categories','transactions','recategorization','system'].includes(c) ? c : 'system';
+  const dotClass = impact => ({high:'high',medium:'medium',low:'low'})[impact] || 'info';
+  const impactLabel = impact => ({high:'🔴 Impact élevé',medium:'🟡 Impact moyen',low:'🔵 Faible impact'})[impact] || impact;
+  const fmtDate = iso => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})
+           + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  };
+
+  body.innerHTML = `<div class="rn-timeline">${notes.map(n => `
+    <div class="rn-item">
+      <div class="rn-dot ${dotClass(n.impact)}"></div>
+      <div class="rn-card">
+        <div class="rn-header">
+          <div class="rn-title">${n.title}</div>
+          <div class="rn-date">${fmtDate(n.released_at)}</div>
+        </div>
+        <div class="rn-cat-tag ${catClass(n.category)}">${n.category||'system'}</div>
+        ${n.description ? `<div class="rn-description">${n.description}</div>` : ''}
+        <div class="rn-impact-tag ${n.impact||'low'}">${impactLabel(n.impact)}</div>
+        ${n.details && Object.keys(n.details).length
+          ? `<details style="margin-top:10px"><summary style="font-size:10px;color:#475569;cursor:pointer">Détails techniques</summary>
+             <pre style="margin-top:6px;background:#12141e;border:1px solid #2d3148;border-radius:6px;padding:10px;font-size:10px;color:#475569;overflow-x:auto;white-space:pre-wrap">${JSON.stringify(n.details,null,2)}</pre></details>`
+          : ''}
+      </div>
+    </div>`).join('')}</div>`;
 }
 
 // ── KPI Clients ───────────────────────────────────────────────
@@ -1394,6 +1686,12 @@ function closeImpayes() {
 // ── Init ─────────────────────────────────────────────────────
 buildMonthCombo();
 fetchAll();
+// Badge alertes au démarrage (sans afficher la page)
+fetch(`${API}/api/alerts?days=30`).then(r=>r.json()).then(j=>{
+  const n = j.total_alerts||0;
+  const b = document.getElementById('alert-badge');
+  if (b) { b.textContent=n; b.style.display=n>0?'':'none'; }
+}).catch(()=>{});
 
 // ── Sync manuel ──────────────────────────────────────────────
 let _syncPoll = null;

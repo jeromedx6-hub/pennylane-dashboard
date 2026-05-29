@@ -48,6 +48,57 @@ app.add_middleware(
 sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 
+# ── Auto-sync release notes au démarrage ──────────────────────────────────────
+def _sync_release_notes():
+    """
+    Lit releases.json et insère dans Supabase les entrées absentes.
+    Dedup par details->>'uid'. Idempotent — safe à relancer à chaque deploy.
+    """
+    import json as _json
+    releases_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'releases.json')
+    try:
+        with open(releases_file) as f:
+            entries = _json.load(f)
+    except (FileNotFoundError, _json.JSONDecodeError) as e:
+        logging.warning(f"releases.json introuvable ou invalide : {e}")
+        return
+
+    # UIDs déjà en base
+    existing = sb.table("release_notes").select("details").execute().data
+    existing_uids = {
+        r["details"].get("uid")
+        for r in existing
+        if r.get("details") and isinstance(r["details"], dict)
+    }
+
+    to_insert = []
+    for e in entries:
+        uid = e.get("uid")
+        if not uid or uid in existing_uids:
+            continue
+        details = dict(e.get("details") or {})
+        details["uid"] = uid          # stocke le uid dans details pour dedup futur
+        to_insert.append({
+            "released_at": e["released_at"],
+            "category":    e["category"],
+            "title":       e["title"],
+            "description": e.get("description", ""),
+            "impact":      e.get("impact", "low"),
+            "details":     details,
+        })
+
+    if to_insert:
+        sb.table("release_notes").insert(to_insert).execute()
+        logging.info(f"Release notes : {len(to_insert)} nouvelle(s) entrée(s) insérée(s)")
+    else:
+        logging.info("Release notes : déjà à jour")
+
+try:
+    _sync_release_notes()
+except Exception as _e:
+    logging.warning(f"_sync_release_notes échec (non bloquant) : {_e}")
+
+
 def _month_range(month: str) -> tuple[str, str]:
     """'2025-05' → ('2025-05-01', '2025-05-31')"""
     y, m = int(month[:4]), int(month[5:7])

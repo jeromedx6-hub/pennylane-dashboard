@@ -1,0 +1,62 @@
+[
+  {
+    "uid": "2026.05.29-1-new-categories",
+    "released_at": "2026-05-29",
+    "category": "new_category",
+    "title": "11 nouvelles catégories Pennylane sans mapping P&L",
+    "description": "Détection automatique de catégories présentes dans les transactions mais absentes du mapping P&L. Permet de repérer les catégories à mapper.",
+    "impact": "medium",
+    "details": {}
+  },
+  {
+    "uid": "2026.05.29-2-sync-resync",
+    "released_at": "2026-05-29",
+    "category": "sync_fix",
+    "title": "Resync complet 2025-2026 — 4915 transactions recatégorisées",
+    "description": "Resync manuel déclenché sur l'ensemble de l'historique (jan 2025 → mai 2026). Correction des catégories sur toutes les dates hors fenêtre quotidienne.",
+    "impact": "high",
+    "details": {
+      "modified_count": 4915,
+      "date_from": "2025-01-01",
+      "date_to": "2026-05-29"
+    }
+  },
+  {
+    "uid": "2026.05.29-3-elearning-tiebreaker",
+    "released_at": "2026-05-29",
+    "category": "bug_fix",
+    "title": "Fix catégories E-learning — tiebreaker Frais Généraux",
+    "description": "Correctif sync v2026.05.29-2 : quand Pennylane assigne plusieurs catégories au même poids (ex : Frais Généraux + E-learning Alchimiste 1x), le moteur préfère désormais les familles revenus pour les transactions crédit. Corrige les faux classements de Prevost, Caia, Grotowski en mai 2026.",
+    "impact": "high",
+    "details": {
+      "sync_version": "2026.05.29-2",
+      "root_cause": "Pennylane assignait 3 catégories poids=1.0. Sans tiebreaker, Frais Généraux gagnait.",
+      "fix": "EXPENSE_FAMILY_IDS + _cat_sort_key() : pénalité pour familles charges sur crédits.",
+      "affected": ["Prevost mai 2026", "Olga Caia mai 2026", "Grotowski mai 2026"]
+    }
+  },
+  {
+    "uid": "2026.05.29-4-pl-uncateg-split",
+    "released_at": "2026-05-29",
+    "category": "feature",
+    "title": "P&L — Séparation encaissements / dépenses non catégorisés",
+    "description": "La ligne 'À catégoriser' est maintenant scindée en deux : encaissements non catégorisés (après TOTAL CA HT) et dépenses non catégorisées (entre Total Structure et EBITDA). Ajout d'une ligne CA total potentiel.",
+    "impact": "medium",
+    "details": {
+      "new_rows": ["_uncategorized_revenue", "_uncategorized_expenses"],
+      "ca_total_line": true
+    }
+  },
+  {
+    "uid": "2026.05.29-5-uncateg-modal-export",
+    "released_at": "2026-05-29",
+    "category": "feature",
+    "title": "Modal drill-down transactions non catégorisées + export CSV",
+    "description": "Cliquer sur un bandeau non catégorisé ouvre un modal avec le détail complet. Bouton export CSV avec BOM UTF-8 pour Excel. Barre indicateur général au-dessus du P&L (montant total + nb lignes par type).",
+    "impact": "low",
+    "details": {
+      "endpoint": "/api/uncategorized_detail?type=revenue|expenses|all",
+      "features": ["drill-down", "export CSV", "barre résumé", "type=all combiné"]
+    }
+  }
+]

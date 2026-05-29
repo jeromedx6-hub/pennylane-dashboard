@@ -97,6 +97,8 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 .pl-table tr.pl-row:hover td { background:rgba(99,102,241,.08); }
 .pl-table tr.pl-row td:first-child::after { content:' ↗'; font-size:9px; color:#475569; opacity:0; transition:opacity .12s; }
 .pl-table tr.pl-row:hover td:first-child::after { opacity:1; }
+.pl-table tr.uncateg-row td { color:#94a3b8; font-style:italic; border-top:1px dashed #2d3148; background:rgba(245,158,11,.03); }
+.pl-table tr.uncateg-row td:first-child { color:#f59e0b; }
 .positive { color:#4ade80 !important; }
 .negative { color:#f87171 !important; }
 .warn-text { color:#fb923c !important; }
@@ -778,9 +780,13 @@ function renderPL(plData, kpis) {
   const mcs = { 2: kpis.mc1, 3: kpis.mc2, 4: kpis.marge_brute, 5: kpis.ebitda };
   const mcPcts = { 2: kpis.mc1_pct, 3: kpis.mc2_pct, 4: kpis.marge_brute_pct, 5: kpis.ebitda_pct };
 
+  // Séparer la ligne "À catégoriser" du reste (hors P&L normal)
+  const uncategRow = plData.find(r => r.axe3_analytics === '_uncategorized');
+  const normalData = plData.filter(r => r.axe3_analytics !== '_uncategorized');
+
   // Grouper par section
   const bySection = {};
-  for (const row of plData) {
+  for (const row of normalData) {
     const s = row.pl_section || 0;
     if (!bySection[s]) bySection[s] = [];
     bySection[s].push(row);
@@ -828,6 +834,14 @@ function renderPL(plData, kpis) {
       html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(1, 'TOTAL CA HT', true)">
         <td>TOTAL CA HT</td><td class="positive">${fmtEur(kpis.ca_ht)}</td><td>100%</td>
       </tr>`;
+      // Ligne "À catégoriser" — informative, hors P&L, après TOTAL CA HT
+      if (uncategRow && uncategRow.amount > 0) {
+        html += `<tr class="uncateg-row">
+          <td>⚠ À catégoriser <span style="font-size:10px;color:#64748b;font-style:normal">(${uncategRow.tx_count} tx · hors P&L)</span></td>
+          <td style="color:#f59e0b">${fmtEur(uncategRow.amount)}</td>
+          <td style="color:#64748b">${fmt(uncategRow.amount/ca*100,1)}%</td>
+        </tr>`;
+      }
     }
   }
 

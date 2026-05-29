@@ -158,6 +158,38 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
         aggregated[key]["amount"]   += float(r["amount"] or 0)
         aggregated[key]["tx_count"] += int(r["tx_count"] or 0)
 
+    # Ligne "À catégoriser" : crédits avec category_name='Revenu' non encore mappés
+    # (transactions Pennylane sans catégorie produit assignée — hors P&L)
+    uncateg_total, uncateg_count = 0.0, 0
+    pg = 0
+    while True:
+        batch = (
+            sb.table("transactions")
+            .select("amount")
+            .gte("date", d_from).lte("date", d_to)
+            .eq("category_name", "Revenu")
+            .eq("direction", "credit")
+            .range(pg * 1000, (pg + 1) * 1000 - 1)
+            .execute().data
+        )
+        for tx in batch:
+            uncateg_total += float(tx["amount"] or 0)
+            uncateg_count += 1
+        if len(batch) < 1000:
+            break
+        pg += 1
+
+    if uncateg_total > 0.5:
+        aggregated["_uncategorized"] = {
+            "poste_budgetaire": "⚠ À catégoriser",
+            "axe2_pole":        None,
+            "axe3_analytics":   "_uncategorized",
+            "pl_section":       1,
+            "is_revenue":       True,
+            "amount":           round(uncateg_total, 2),
+            "tx_count":         uncateg_count,
+        }
+
     return {"month": month, "data": sorted(aggregated.values(), key=lambda x: (x["pl_section"] or 9, x["poste_budgetaire"]))}
 
 

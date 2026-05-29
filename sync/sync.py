@@ -19,6 +19,28 @@ SUPABASE_KEY     = os.environ["SUPABASE_KEY"]
 SYNC_WINDOW_DAYS = int(os.getenv("SYNC_WINDOW_DAYS", "7"))
 BASE_URL         = "https://app.pennylane.com/api/external/v2"
 
+# IDs familles Pennylane à ignorer pour le P&L (trésorerie / technique)
+# L'API ne retourne PAS le label dans category_group, uniquement l'id numérique
+EXCLUDED_FAMILY_IDS = {
+    2766080,        # Suivi de trésorerie
+    12401360896,    # TVA
+    12220481536,    # Test
+    12473860096,    # Test 156
+    12197789696,    # Transfert interne
+    2791098,        # Pole Marketing
+}
+
+def _best_category(categories: list) -> str:
+    """Retourne le label de catégorie principale (hors familles exclues)."""
+    if not categories:
+        return ""
+    cats_sorted = sorted(categories, key=lambda c: float(c.get("weight", 0)), reverse=True)
+    preferred   = [c for c in cats_sorted
+                   if int((c.get("category_group") or {}).get("id", 0) or 0)
+                   not in EXCLUDED_FAMILY_IDS]
+    cat = preferred[0] if preferred else cats_sorted[0]
+    return cat.get("label", "")
+
 
 # ── Pennylane ──────────────────────────────────────────────────────────────
 
@@ -67,25 +89,13 @@ def normalize_transaction(tx):
     amount    = float(tx.get("currency_amount") or tx.get("amount") or 0)
     direction = "credit" if amount >= 0 else "debit"
 
-    # IDs familles à ignorer pour le P&L (cash-flow / technique)
-    # L'API Pennylane ne retourne PAS le label dans category_group — uniquement l'id
-    EXCLUDED_FAMILY_IDS = {
-        2766080,        # Suivi de trésorerie
-        12401360896,    # TVA
-        12220481536,    # Test
-        12473860096,    # Test 156
-        12197789696,    # Transfert interne
-        2791098,        # Pole Marketing
-    }
-
-    # Catégorie principale : poids le plus élevé HORS familles exclues
-    # Fallback sur la première si toutes sont exclues
+    # Catégorie principale : poids le plus élevé HORS familles exclues (cf. EXCLUDED_FAMILY_IDS)
     cats = tx.get("categories") or []
     if cats:
-        cats_sorted = sorted(cats, key=lambda c: float(c.get("weight", 0)), reverse=True)
-        preferred   = [c for c in cats_sorted
-                       if int((c.get("category_group") or {}).get("id", 0) or 0)
-                       not in EXCLUDED_FAMILY_IDS]
+        cats_sorted   = sorted(cats, key=lambda c: float(c.get("weight", 0)), reverse=True)
+        preferred     = [c for c in cats_sorted
+                         if int((c.get("category_group") or {}).get("id", 0) or 0)
+                         not in EXCLUDED_FAMILY_IDS]
         cat           = preferred[0] if preferred else cats_sorted[0]
         category_name = cat.get("label", "")
         category_id   = str(cat.get("id", ""))
@@ -235,8 +245,7 @@ def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
         cats = tx.get("categories") or []
         cat_name = ""
         if cats:
-            cat_name = sorted(cats, key=lambda c: float(c.get("weight", 0)),
-                               reverse=True)[0].get("label", "")
+            cat_name = _best_category(cats)
         pl_by_id[f"tx_{tx['id']}"] = {"category_name": cat_name, "date": d}
 
     # ── 2. Source Supabase (pagination, avec category_name) ───────────────

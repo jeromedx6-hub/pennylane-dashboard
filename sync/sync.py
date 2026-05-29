@@ -67,16 +67,25 @@ def normalize_transaction(tx):
     amount    = float(tx.get("currency_amount") or tx.get("amount") or 0)
     direction = "credit" if amount >= 0 else "debit"
 
-    # Familles à ignorer pour le P&L (cash-flow / technique)
-    EXCLUDED_FAMILIES = {"Suivi de trésorerie", "TVA", "Transfert interne", "Test", "Test 156"}
+    # IDs familles à ignorer pour le P&L (cash-flow / technique)
+    # L'API Pennylane ne retourne PAS le label dans category_group — uniquement l'id
+    EXCLUDED_FAMILY_IDS = {
+        2766080,        # Suivi de trésorerie
+        12401360896,    # TVA
+        12220481536,    # Test
+        12473860096,    # Test 156
+        12197789696,    # Transfert interne
+        2791098,        # Pole Marketing
+    }
 
     # Catégorie principale : poids le plus élevé HORS familles exclues
-    # Si toutes les catégories sont exclues, on prend quand même la première (fallback)
+    # Fallback sur la première si toutes sont exclues
     cats = tx.get("categories") or []
     if cats:
         cats_sorted = sorted(cats, key=lambda c: float(c.get("weight", 0)), reverse=True)
         preferred   = [c for c in cats_sorted
-                       if (c.get("category_group") or {}).get("label", "") not in EXCLUDED_FAMILIES]
+                       if int((c.get("category_group") or {}).get("id", 0) or 0)
+                       not in EXCLUDED_FAMILY_IDS]
         cat           = preferred[0] if preferred else cats_sorted[0]
         category_name = cat.get("label", "")
         category_id   = str(cat.get("id", ""))

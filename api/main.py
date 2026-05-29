@@ -16,7 +16,7 @@ if _sync_dir not in _sys.path:
 
 _sync_lock  = threading.Lock()
 _sync_state = {"running": False, "started_at": None, "finished_at": None,
-               "error": None, "date_from": None, "date_to": None}
+               "error": None, "date_from": None, "date_to": None, "audit": None}
 
 app = FastAPI(title="FinBoard API")
 
@@ -694,10 +694,11 @@ def trigger_sync(
             _sync_state["date_to"]     = d_to.isoformat()
         try:
             import sync as _sync_mod
-            _sync_mod.run(d_from, d_to)
+            audit = _sync_mod.run(d_from, d_to)
             with _sync_lock:
                 _sync_state["running"]     = False
                 _sync_state["finished_at"] = _dt.now().strftime("%H:%M:%S")
+                _sync_state["audit"]       = audit
         except Exception as e:
             with _sync_lock:
                 _sync_state["running"]     = False
@@ -710,8 +711,27 @@ def trigger_sync(
 
 @app.get("/api/sync_status")
 def get_sync_status():
-    """État du sync en cours ou dernier sync."""
+    """État du sync en cours ou dernier sync (inclut le rapport d'audit)."""
     return _sync_state
+
+
+@app.get("/api/sync_audit")
+def get_sync_audit(limit: int = Query(default=10, le=50)):
+    """
+    Historique des réconciliations hybrides (Pennylane API ↔ Supabase).
+    Retourne les N derniers rapports d'audit avec les écarts détectés et corrigés.
+    """
+    try:
+        rows = (
+            sb.table("sync_audit")
+            .select("*")
+            .order("checked_at", desc=True)
+            .limit(limit)
+            .execute().data
+        )
+        return {"data": rows}
+    except Exception as e:
+        return {"data": [], "error": str(e)}
 
 
 # Sert le frontend HTML en production

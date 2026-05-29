@@ -3,8 +3,9 @@
 Sync quotidien Pennylane → Supabase  (via transactions bancaires)
 Cron Railway : 0 6 * * *
 """
-import os, sys, logging, time
-from datetime import date, timedelta
+import os, sys, logging, time, json
+from collections import defaultdict
+from datetime import date, timedelta, datetime as _dt
 
 import requests
 from supabase import create_client
@@ -157,6 +158,131 @@ def compute_kpis(sb, target_date):
     log.info(f"  kpis : CA={ca:.0f}€  EBITDA={ebitda:.0f}€ ({pct(ebitda,ca)}%)  — {date_str}")
 
 
+# ── Réconciliation hybride MCP ↔ API ──────────────────────────────────────
+
+def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
+    """
+    Réconciliation hybride : compare Pennylane API vs Supabase par jour.
+    Vérifie le nb de transactions ET les montants totaux.
+    Auto-corrige les jours désynchronisés (upsert Pennylane + delete ghosts + recalcul P&L).
+    Écrit le rapport dans la table sync_audit.
+    """
+    log.info("🔍 Réconciliation Pennylane ↔ Supabase…")
+
+    # ── 1. Source Pennylane ───────────────────────────────────────────────
+    pl_txs = pl_transactions if pl_transactions is not None \
+             else pl_get_transactions(token, date_from, date_to)
+
+    pl_by_day = defaultdict(lambda: {"count": 0, "amount": 0.0})
+    for tx in pl_txs:
+        d      = tx["date"]
+        amount = abs(float(tx.get("currency_amount") or tx.get("amount") or 0))
+        pl_by_day[d]["count"]  += 1
+        pl_by_day[d]["amount"] += amount
+
+    # ── 2. Source Supabase (pagination) ───────────────────────────────────
+    d_from_str, d_to_str = date_from.isoformat(), date_to.isoformat()
+    sb_rows, page, size = [], 0, 1000
+    while page < 30:
+        batch = (
+            sb.table("transactions")
+            .select("date, amount, id")
+            .gte("date", d_from_str)
+            .order("date")
+            .range(page * size, (page + 1) * size - 1)
+            .execute().data
+        )
+        sb_rows.extend(r for r in batch if r["date"] <= d_to_str)
+        if len(batch) < size:
+            break
+        if batch and batch[-1]["date"] > d_to_str:
+            break
+        page += 1
+
+    sb_by_day = defaultdict(lambda: {"count": 0, "amount": 0.0, "ids": []})
+    for tx in sb_rows:
+        d = tx["date"]
+        sb_by_day[d]["count"]  += 1
+        sb_by_day[d]["amount"] += abs(float(tx["amount"] or 0))
+        sb_by_day[d]["ids"].append(tx["id"])
+
+    # ── 3. Détection des écarts ───────────────────────────────────────────
+    gaps = []
+    current = date_from
+    while current <= date_to:
+        d    = current.isoformat()
+        pl_d = pl_by_day.get(d,  {"count": 0, "amount": 0.0})
+        sb_d = sb_by_day.get(d,  {"count": 0, "amount": 0.0, "ids": []})
+
+        count_diff  = abs(pl_d["count"]  - sb_d["count"])
+        amount_diff = abs(pl_d["amount"] - sb_d["amount"])
+
+        if count_diff > 0 or amount_diff > 0.50:   # tolérance 50 centimes
+            gaps.append({
+                "date":        d,
+                "pl_count":    pl_d["count"],
+                "sb_count":    sb_d["count"],
+                "pl_amount":   round(pl_d["amount"], 2),
+                "sb_amount":   round(sb_d["amount"], 2),
+                "amount_diff": round(amount_diff, 2),
+            })
+        current += timedelta(days=1)
+
+    # ── 4. Auto-correction des jours en écart ─────────────────────────────
+    auto_fixed = []
+    if gaps:
+        log.warning(f"  ⚠️  {len(gaps)} jour(s) désynchronisé(s) → auto-correction")
+        mapping = {r["pennylane_category_name"]: r
+                   for r in sb.table("category_mapping").select("*").execute().data}
+
+        for gap in gaps:
+            d        = gap["date"]
+            gap_date = date.fromisoformat(d)
+            day_pl   = [tx for tx in pl_txs if tx["date"] == d]
+            day_pl_ids = {f"tx_{tx['id']}" for tx in day_pl}
+
+            # Upsert les transactions Pennylane du jour
+            normalized = [r for r in (normalize_transaction(tx) for tx in day_pl) if r]
+            if normalized:
+                sb.table("transactions").upsert(normalized, on_conflict="id").execute()
+
+            # Supprimer ghost rows : présents dans Supabase mais plus dans Pennylane
+            sb_ids_day = sb_by_day.get(d, {}).get("ids", [])
+            ghost_ids  = [i for i in sb_ids_day if i not in day_pl_ids]
+            if ghost_ids:
+                log.warning(f"    🗑️  {len(ghost_ids)} ghost(s) supprimé(s) le {d}: {ghost_ids}")
+                for gid in ghost_ids:
+                    sb.table("transactions").delete().eq("id", gid).execute()
+
+            # Recalcul P&L + KPIs
+            compute_pl_daily(sb, mapping, gap_date)
+            compute_kpis(sb, gap_date)
+            auto_fixed.append(d)
+            log.info(f"    ✅ {d} corrigé — PL:{gap['pl_count']} tx / SB:{gap['sb_count']} tx"
+                     f" / écart montant:{gap['amount_diff']}€")
+    else:
+        log.info("  ✅ Réconciliation OK — aucun écart détecté")
+
+    # ── 5. Écriture audit trail ───────────────────────────────────────────
+    status = "auto_fixed" if auto_fixed else ("gaps_found" if gaps else "ok")
+    n_days = (date_to - date_from).days + 1
+    audit_row = {
+        "checked_at": _dt.utcnow().isoformat() + "Z",
+        "date_from":  date_from.isoformat(),
+        "date_to":    date_to.isoformat(),
+        "status":     status,
+        "gaps":       gaps,
+        "summary":    f"{len(gaps)} écart(s) sur {n_days} jour(s) — {len(auto_fixed)} auto-corrigé(s)",
+    }
+    try:
+        sb.table("sync_audit").insert(audit_row).execute()
+    except Exception as e:
+        log.warning(f"  sync_audit write failed (table créée ?) : {e}")
+
+    log.info(f"  Audit : {status} | {audit_row['summary']}")
+    return {"status": status, "gaps": gaps, "auto_fixed": auto_fixed}
+
+
 # ── Customer invoices ─────────────────────────────────────────────────────
 
 def sync_customer_invoices(token, sb, date_from, date_to):
@@ -232,7 +358,13 @@ def run(date_from=None, date_to=None):
 
     sync_customer_invoices(PENNYLANE_TOKEN, sb, date_from, date_to)
 
+    # Réconciliation hybride : vérifie la cohérence Pennylane ↔ Supabase
+    # Réutilise les transactions déjà fetchées → 0 appel API supplémentaire
+    audit = verify_sync(PENNYLANE_TOKEN, sb, date_from, date_to,
+                        pl_transactions=transactions)
+
     log.info("✅ Sync terminé.")
+    return audit
 
 
 if __name__ == "__main__":

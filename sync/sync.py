@@ -162,10 +162,13 @@ def compute_kpis(sb, target_date):
 
 def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
     """
-    Réconciliation hybride : compare Pennylane API vs Supabase par jour.
-    Vérifie le nb de transactions ET les montants totaux.
-    Auto-corrige les jours désynchronisés (upsert Pennylane + delete ghosts + recalcul P&L).
-    Écrit le rapport dans la table sync_audit.
+    Réconciliation hybride Pennylane API ↔ Supabase.
+
+    Vérifie 2 niveaux :
+      1. Écarts de volume/montant par jour (transactions manquantes ou supprimées)
+      2. Changements de catégorie par transaction (recatégorisations rétroactives)
+
+    Auto-corrige tout et écrit le rapport dans sync_audit.
     """
     log.info("🔍 Réconciliation Pennylane ↔ Supabase…")
 
@@ -173,20 +176,30 @@ def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
     pl_txs = pl_transactions if pl_transactions is not None \
              else pl_get_transactions(token, date_from, date_to)
 
+    # Aggrégation par jour (pour check volume/montant)
     pl_by_day = defaultdict(lambda: {"count": 0, "amount": 0.0})
+    # Map par ID (pour check catégorie)
+    pl_by_id  = {}
     for tx in pl_txs:
         d      = tx["date"]
         amount = abs(float(tx.get("currency_amount") or tx.get("amount") or 0))
         pl_by_day[d]["count"]  += 1
         pl_by_day[d]["amount"] += amount
+        # Catégorie principale (weight la plus haute)
+        cats = tx.get("categories") or []
+        cat_name = ""
+        if cats:
+            cat_name = sorted(cats, key=lambda c: float(c.get("weight", 0)),
+                               reverse=True)[0].get("label", "")
+        pl_by_id[f"tx_{tx['id']}"] = {"category_name": cat_name, "date": d}
 
-    # ── 2. Source Supabase (pagination) ───────────────────────────────────
+    # ── 2. Source Supabase (pagination, avec category_name) ───────────────
     d_from_str, d_to_str = date_from.isoformat(), date_to.isoformat()
     sb_rows, page, size = [], 0, 1000
     while page < 30:
         batch = (
             sb.table("transactions")
-            .select("date, amount, id")
+            .select("date, amount, id, category_name")
             .gte("date", d_from_str)
             .order("date")
             .range(page * size, (page + 1) * size - 1)
@@ -200,79 +213,119 @@ def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
         page += 1
 
     sb_by_day = defaultdict(lambda: {"count": 0, "amount": 0.0, "ids": []})
+    sb_by_id  = {}
     for tx in sb_rows:
         d = tx["date"]
         sb_by_day[d]["count"]  += 1
         sb_by_day[d]["amount"] += abs(float(tx["amount"] or 0))
         sb_by_day[d]["ids"].append(tx["id"])
+        sb_by_id[tx["id"]] = tx.get("category_name", "")
 
-    # ── 3. Détection des écarts ───────────────────────────────────────────
+    # ── 3a. Détection écarts de volume/montant par jour ───────────────────
     gaps = []
     current = date_from
     while current <= date_to:
         d    = current.isoformat()
-        pl_d = pl_by_day.get(d,  {"count": 0, "amount": 0.0})
-        sb_d = sb_by_day.get(d,  {"count": 0, "amount": 0.0, "ids": []})
+        pl_d = pl_by_day.get(d, {"count": 0, "amount": 0.0})
+        sb_d = sb_by_day.get(d, {"count": 0, "amount": 0.0, "ids": []})
 
-        count_diff  = abs(pl_d["count"]  - sb_d["count"])
-        amount_diff = abs(pl_d["amount"] - sb_d["amount"])
-
-        if count_diff > 0 or amount_diff > 0.50:   # tolérance 50 centimes
+        if abs(pl_d["count"] - sb_d["count"]) > 0 \
+                or abs(pl_d["amount"] - sb_d["amount"]) > 0.50:
             gaps.append({
                 "date":        d,
-                "pl_count":    pl_d["count"],
-                "sb_count":    sb_d["count"],
+                "pl_count":    pl_d["count"],  "sb_count":    sb_d["count"],
                 "pl_amount":   round(pl_d["amount"], 2),
                 "sb_amount":   round(sb_d["amount"], 2),
-                "amount_diff": round(amount_diff, 2),
+                "amount_diff": round(abs(pl_d["amount"] - sb_d["amount"]), 2),
             })
         current += timedelta(days=1)
 
-    # ── 4. Auto-correction des jours en écart ─────────────────────────────
-    auto_fixed = []
-    if gaps:
-        log.warning(f"  ⚠️  {len(gaps)} jour(s) désynchronisé(s) → auto-correction")
+    # ── 3b. Détection changements de catégorie (recatégorisations) ────────
+    cat_changes = []
+    for tid, pl_info in pl_by_id.items():
+        if tid in sb_by_id and sb_by_id[tid] != pl_info["category_name"]:
+            cat_changes.append({
+                "tx_id":        tid,
+                "date":         pl_info["date"],
+                "old_category": sb_by_id[tid],
+                "new_category": pl_info["category_name"],
+            })
+
+    if cat_changes:
+        log.warning(f"  ⚠️  {len(cat_changes)} recatégorisation(s) détectée(s)")
+        for c in cat_changes:
+            log.info(f"    🔄 {c['tx_id']} {c['date']}: "
+                     f"'{c['old_category']}' → '{c['new_category']}'")
+
+    # ── 4. Auto-correction (volume + catégories) ──────────────────────────
+    auto_fixed_dates = set()
+    needs_fix = gaps or cat_changes
+
+    if needs_fix:
         mapping = {r["pennylane_category_name"]: r
                    for r in sb.table("category_mapping").select("*").execute().data}
 
+        # 4a. Correction écarts de volume
         for gap in gaps:
-            d        = gap["date"]
-            gap_date = date.fromisoformat(d)
-            day_pl   = [tx for tx in pl_txs if tx["date"] == d]
+            d          = gap["date"]
+            day_pl     = [tx for tx in pl_txs if tx["date"] == d]
             day_pl_ids = {f"tx_{tx['id']}" for tx in day_pl}
 
-            # Upsert les transactions Pennylane du jour
             normalized = [r for r in (normalize_transaction(tx) for tx in day_pl) if r]
             if normalized:
                 sb.table("transactions").upsert(normalized, on_conflict="id").execute()
 
-            # Supprimer ghost rows : présents dans Supabase mais plus dans Pennylane
-            sb_ids_day = sb_by_day.get(d, {}).get("ids", [])
-            ghost_ids  = [i for i in sb_ids_day if i not in day_pl_ids]
+            # Supprimer ghost rows
+            ghost_ids = [i for i in sb_by_day.get(d, {}).get("ids", [])
+                         if i not in day_pl_ids]
             if ghost_ids:
                 log.warning(f"    🗑️  {len(ghost_ids)} ghost(s) supprimé(s) le {d}: {ghost_ids}")
                 for gid in ghost_ids:
                     sb.table("transactions").delete().eq("id", gid).execute()
 
-            # Recalcul P&L + KPIs
-            compute_pl_daily(sb, mapping, gap_date)
-            compute_kpis(sb, gap_date)
-            auto_fixed.append(d)
-            log.info(f"    ✅ {d} corrigé — PL:{gap['pl_count']} tx / SB:{gap['sb_count']} tx"
-                     f" / écart montant:{gap['amount_diff']}€")
-    else:
-        log.info("  ✅ Réconciliation OK — aucun écart détecté")
+            auto_fixed_dates.add(d)
+            log.info(f"    ✅ Volume corrigé {d} — "
+                     f"PL:{gap['pl_count']} tx / SB:{gap['sb_count']} tx")
 
-    # ── 5. Écriture audit trail ───────────────────────────────────────────
-    status = "auto_fixed" if auto_fixed else ("gaps_found" if gaps else "ok")
+        # 4b. Correction recatégorisations : upsert la tx avec la nouvelle catégorie
+        for change in cat_changes:
+            tid     = change["tx_id"]
+            src_id  = tid.replace("tx_", "")
+            day_pl  = [tx for tx in pl_txs if str(tx["id"]) == src_id]
+            if day_pl:
+                normalized = [r for r in (normalize_transaction(tx) for tx in day_pl) if r]
+                if normalized:
+                    sb.table("transactions").upsert(normalized, on_conflict="id").execute()
+            auto_fixed_dates.add(change["date"])
+
+        # 4c. Recalcul P&L + KPIs pour toutes les dates touchées
+        for d in sorted(auto_fixed_dates):
+            compute_pl_daily(sb, mapping, date.fromisoformat(d))
+            compute_kpis(sb, date.fromisoformat(d))
+
+        log.info(f"  ✅ {len(auto_fixed_dates)} jour(s) recalculé(s) : "
+                 f"{', '.join(sorted(auto_fixed_dates))}")
+    else:
+        log.info("  ✅ Réconciliation OK — aucun écart ni recatégorisation")
+
+    # ── 5. Audit trail ────────────────────────────────────────────────────
+    auto_fixed = sorted(auto_fixed_dates)
     n_days = (date_to - date_from).days + 1
+    any_issue = gaps or cat_changes
+    status = ("auto_fixed" if auto_fixed
+              else ("gaps_found" if any_issue else "ok"))
+
     audit_row = {
-        "checked_at": _dt.utcnow().isoformat() + "Z",
-        "date_from":  date_from.isoformat(),
-        "date_to":    date_to.isoformat(),
-        "status":     status,
-        "gaps":       gaps,
-        "summary":    f"{len(gaps)} écart(s) sur {n_days} jour(s) — {len(auto_fixed)} auto-corrigé(s)",
+        "checked_at":  _dt.utcnow().isoformat() + "Z",
+        "date_from":   date_from.isoformat(),
+        "date_to":     date_to.isoformat(),
+        "status":      status,
+        "gaps":        gaps,
+        "cat_changes": cat_changes,
+        "summary": (
+            f"{len(gaps)} écart(s) volume, {len(cat_changes)} recatégorisation(s) "
+            f"sur {n_days} jour(s) — {len(auto_fixed)} jour(s) auto-corrigé(s)"
+        ),
     }
     try:
         sb.table("sync_audit").insert(audit_row).execute()
@@ -280,7 +333,8 @@ def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
         log.warning(f"  sync_audit write failed (table créée ?) : {e}")
 
     log.info(f"  Audit : {status} | {audit_row['summary']}")
-    return {"status": status, "gaps": gaps, "auto_fixed": auto_fixed}
+    return {"status": status, "gaps": gaps, "cat_changes": cat_changes,
+            "auto_fixed": auto_fixed}
 
 
 # ── Customer invoices ─────────────────────────────────────────────────────

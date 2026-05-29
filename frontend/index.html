@@ -195,6 +195,15 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 .alert-chip  { font-size:10px; padding:2px 8px; border-radius:4px; background:#1a1d27; border:1px solid #2d3148; color:#94a3b8; }
 .alert-amount { font-size:12px; font-weight:600; color:#f87171; white-space:nowrap; flex-shrink:0; margin-left:4px; }
 
+/* ── Barre indicateur non catégorisés ───────────────────── */
+#uncateg-summary-bar { display:none; align-items:center; gap:10px; padding:9px 16px; background:rgba(245,158,11,.07); border-bottom:1px solid rgba(245,158,11,.18); cursor:pointer; transition:background .15s; }
+#uncateg-summary-bar:hover { background:rgba(245,158,11,.13); }
+#uncateg-summary-bar .usb-icon { font-size:14px; flex-shrink:0; }
+#uncateg-summary-bar .usb-label { font-size:12px; color:#fbbf24; font-weight:600; }
+#uncateg-summary-bar .usb-meta { font-size:11px; color:#78716c; }
+#uncateg-summary-bar .usb-chips { display:flex; gap:6px; margin-left:auto; align-items:center; }
+#uncateg-summary-bar .usb-chip { padding:2px 8px; border-radius:12px; font-size:10px; font-weight:600; background:rgba(245,158,11,.18); color:#f59e0b; border:1px solid rgba(245,158,11,.3); }
+#uncateg-summary-bar .usb-cta { font-size:10px; color:#64748b; margin-left:4px; }
 /* ── Release notes timeline ──────────────────────────────── */
 .rn-timeline { position:relative; padding-left:26px; }
 .rn-timeline::before { content:''; position:absolute; left:8px; top:6px; bottom:6px; width:2px; background:#2d3148; border-radius:1px; }
@@ -322,6 +331,17 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
       <div class="tabs">
         <button class="tab active" onclick="switchPL('month',this)">Mois</button>
         <button class="tab" onclick="switchPL('ytd',this)">YTD</button>
+      </div>
+    </div>
+    <!-- Indicateur général non catégorisés (mis à jour par renderPL) -->
+    <div id="uncateg-summary-bar" onclick="openUncategorizedModal('all')">
+      <span class="usb-icon">⚠</span>
+      <span class="usb-label" id="usb-label">—</span>
+      <span class="usb-meta" id="usb-meta"></span>
+      <div class="usb-chips">
+        <span class="usb-chip" id="usb-chip-rev" style="display:none"></span>
+        <span class="usb-chip" id="usb-chip-exp" style="background:rgba(248,113,113,.12);color:#f87171;border-color:rgba(248,113,113,.25);display:none"></span>
+        <span class="usb-cta">↗ détail &amp; export</span>
       </div>
     </div>
     <table class="pl-table" id="pl-table">
@@ -570,7 +590,9 @@ async function openUncategorizedModal(type) {
   const ytd = state.ytd ? '&ytd=true' : '';
   const url = `${API}/api/uncategorized_detail?month=${m}${ytd}&type=${type}`;
   const isRev = type === 'revenue';
-  const title = isRev ? '⚠ Encaissements non catégorisés' : '⚠ Dépenses non catégorisées';
+  const title = type === 'all'      ? '⚠ Toutes les transactions non catégorisées'
+              : isRev               ? '⚠ Encaissements non catégorisés'
+              :                       '⚠ Dépenses non catégorisées';
 
   document.getElementById('uncateg-modal-title').textContent = title;
   document.getElementById('uncateg-modal-tbody').innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#475569">Chargement…</td></tr>';
@@ -978,6 +1000,32 @@ function renderPL(plData, kpis) {
   }
 
   document.getElementById('pl-body').innerHTML = html;
+
+  // ── Barre indicateur général non catégorisés ──────────────
+  const bar       = document.getElementById('uncateg-summary-bar');
+  const totalCnt  = (uncategRev ? uncategRev.tx_count  : 0) + (uncategExp ? uncategExp.tx_count  : 0);
+  const totalAmt  = (uncategRev ? uncategRev.amount     : 0) + (uncategExp ? uncategExp.amount     : 0);
+  if (totalCnt > 0) {
+    document.getElementById('usb-label').textContent =
+      `${totalCnt} ligne${totalCnt>1?'s':''} non catégorisée${totalCnt>1?'s':''} · ${fmtEur(totalAmt)}`;
+    document.getElementById('usb-meta').textContent =
+      `${state.ytd ? 'YTD' : state.month || ''}`;
+
+    const chipRev = document.getElementById('usb-chip-rev');
+    const chipExp = document.getElementById('usb-chip-exp');
+    if (uncategRev && uncategRev.tx_count > 0) {
+      chipRev.textContent = `↑ ${uncategRev.tx_count} encaiss. ${fmtEur(uncategRev.amount)}`;
+      chipRev.style.display = '';
+    } else { chipRev.style.display = 'none'; }
+    if (uncategExp && uncategExp.tx_count > 0) {
+      chipExp.textContent = `↓ ${uncategExp.tx_count} dép. ${fmtEur(uncategExp.amount)}`;
+      chipExp.style.display = '';
+    } else { chipExp.style.display = 'none'; }
+
+    bar.style.display = 'flex';
+  } else {
+    bar.style.display = 'none';
+  }
 }
 
 // ── Ratios ───────────────────────────────────────────────────

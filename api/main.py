@@ -232,32 +232,33 @@ def get_uncategorized_detail(
         month  = month or today.strftime("%Y-%m")
         d_from, d_to = _month_range(month)
 
-    rows, pg = [], 0
-    while True:
-        if type == "revenue":
-            batch = (
-                sb.table("transactions")
-                .select("date,label,amount,direction,category_name,third_party")
-                .gte("date", d_from).lte("date", d_to)
-                .eq("category_name", "Revenu").eq("direction", "credit")
-                .order("date", desc=True)
-                .range(pg * 1000, (pg + 1) * 1000 - 1).execute().data
-            )
-        else:
-            batch = (
-                sb.table("transactions")
-                .select("date,label,amount,direction,category_name,third_party")
-                .gte("date", d_from).lte("date", d_to)
-                .eq("category_name", "").eq("direction", "debit")
-                .order("date", desc=True)
-                .range(pg * 1000, (pg + 1) * 1000 - 1).execute().data
-            )
-        rows.extend(batch)
-        if len(batch) < 1000:
-            break
-        pg += 1
+    def _fetch_all(extra_filters: list) -> list:
+        """Paginate a query built with a list of (method, *args) filter calls."""
+        out, pg = [], 0
+        while True:
+            q = (sb.table("transactions")
+                 .select("date,label,amount,direction,category_name,third_party")
+                 .gte("date", d_from).lte("date", d_to)
+                 .order("date", desc=True))
+            for method, *args in extra_filters:
+                q = getattr(q, method)(*args)
+            batch = q.range(pg * 1000, (pg + 1) * 1000 - 1).execute().data
+            out.extend(batch)
+            if len(batch) < 1000:
+                break
+            pg += 1
+        return out
 
-    total = sum(float(r["amount"] or 0) for r in rows)
+    if type == "revenue":
+        rows = _fetch_all([("eq", "category_name", "Revenu"), ("eq", "direction", "credit")])
+    elif type == "expenses":
+        rows = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "debit")])
+    else:  # "all"
+        rev  = _fetch_all([("eq", "category_name", "Revenu"), ("eq", "direction", "credit")])
+        exp  = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "debit")])
+        rows = sorted(rev + exp, key=lambda r: r["date"], reverse=True)
+
+    total = sum(float(r["amount"] or 0) * (1 if r["direction"] == "credit" else -1) for r in rows)
     return {"type": type, "data": rows, "total": round(total, 2), "count": len(rows)}
 
 

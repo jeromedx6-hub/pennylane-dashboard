@@ -743,8 +743,15 @@ def trigger_sync(
 
 @app.get("/api/sync_status")
 def get_sync_status():
-    """État du sync en cours ou dernier sync (inclut le rapport d'audit)."""
-    return _sync_state
+    """État du sync en cours ou dernier sync (inclut le rapport d'audit et la version)."""
+    # Récupérer la version stockée dans sync_meta (écrite par le moteur de sync)
+    try:
+        meta = sb.table("sync_meta").select("key,value").in_("key", ["sync_version", "last_synced_at"]).execute().data
+        meta_dict = {r["key"]: r["value"] for r in meta}
+    except Exception:
+        meta_dict = {}
+    return {**_sync_state, "sync_version": meta_dict.get("sync_version", "—"),
+            "last_synced_at": meta_dict.get("last_synced_at", "—")}
 
 
 @app.get("/api/alerts")

@@ -239,7 +239,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
       <select id="month-combo" onchange="onComboChange(this.value)"
         style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 16px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:170px;outline:none">
       </select>
-      <div class="sync-badge"><div class="dot"></div><span id="sync-time">Sync OK</span></div>
+      <div class="sync-badge"><div class="dot"></div><span id="sync-time">Sync OK</span><span id="sync-version" style="margin-left:6px;padding:1px 6px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:4px;font-size:10px;color:#6366f1;font-weight:600;letter-spacing:.03em"></span></div>
       <button class="sync-btn" id="sync-btn-indicateurs" onclick="openSyncModal()">⟳ Recalculer</button>
     </div>
   </div>
@@ -528,6 +528,18 @@ function monthLabel(iso) {
   const [y,m] = iso.split('-');
   return new Date(y,m-1,1).toLocaleDateString('fr-FR',{month:'short',year:'numeric'});
 }
+
+// ── Version sync ─────────────────────────────────────────────
+async function loadSyncVersion() {
+  try {
+    const r = await fetch(`${API}/api/sync_status`);
+    const d = await r.json();
+    const ver = d.sync_version || '';
+    const el  = document.getElementById('sync-version');
+    if (el && ver && ver !== '—') el.textContent = ver;
+  } catch(e) {}
+}
+loadSyncVersion();
 
 // ── Fetch ────────────────────────────────────────────────────
 async function fetchAll() {

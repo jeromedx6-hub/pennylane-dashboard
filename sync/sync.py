@@ -19,6 +19,10 @@ SUPABASE_KEY     = os.environ["SUPABASE_KEY"]
 SYNC_WINDOW_DAYS = int(os.getenv("SYNC_WINDOW_DAYS", "7"))
 BASE_URL         = "https://app.pennylane.com/api/external/v2"
 
+# ── Version du moteur de sync ──────────────────────────────────────────────
+# Incrémenter à chaque deploy significatif pour traçabilité dans le dashboard
+SYNC_VERSION = "2026.05.29-1"
+
 # IDs familles Pennylane à ignorer pour le P&L (trésorerie / technique)
 # L'API ne retourne PAS le label dans category_group, uniquement l'id numérique
 EXCLUDED_FAMILY_IDS = {
@@ -648,12 +652,14 @@ def run(date_from=None, date_to=None):
                      "extra_dates": [d.isoformat() for d in extra_dates]},
         )
 
-    # ── 10. Mise à jour last_synced_at ────────────────────────────────────
+    # ── 10. Mise à jour last_synced_at + version ─────────────────────────
     try:
-        sb.table("sync_meta").upsert(
-            {"key": "last_synced_at", "value": _dt.utcnow().isoformat() + "Z"},
-            on_conflict="key"
-        ).execute()
+        now_iso = _dt.utcnow().isoformat() + "Z"
+        sb.table("sync_meta").upsert([
+            {"key": "last_synced_at", "value": now_iso},
+            {"key": "sync_version",   "value": SYNC_VERSION},
+        ], on_conflict="key").execute()
+        log.info(f"  sync_meta mis à jour — version {SYNC_VERSION}")
     except Exception as e:
         log.warning(f"  sync_meta update failed: {e}")
 

@@ -21,7 +21,7 @@ BASE_URL         = "https://app.pennylane.com/api/external/v2"
 
 # ── Version du moteur de sync ──────────────────────────────────────────────
 # Incrémenter à chaque deploy significatif pour traçabilité dans le dashboard
-SYNC_VERSION = "2026.05.29-1"
+SYNC_VERSION = "2026.05.29-2"
 
 # IDs familles Pennylane à ignorer pour le P&L (trésorerie / technique)
 # L'API ne retourne PAS le label dans category_group, uniquement l'id numérique
@@ -34,11 +34,27 @@ EXCLUDED_FAMILY_IDS = {
     2791098,        # Pole Marketing
 }
 
-def _best_category(categories: list) -> str:
-    """Retourne le label de catégorie principale (hors familles exclues)."""
+# Familles "charges" déprioritisées pour les transactions credit quand poids égal
+# (ex : Pennylane assigne par erreur "Frais Généraux" + "E-learning" au même poids)
+EXPENSE_FAMILY_IDS = {
+    2882925,   # Frais Généraux
+    2886119,   # Charges (famille parente)
+}
+
+def _cat_sort_key(c, direction: str):
+    """Clé de tri : poids DESC, puis pénalité charge pour les crédits."""
+    weight  = float(c.get("weight", 0))
+    fid     = int((c.get("category_group") or {}).get("id", 0) or 0)
+    penalty = 1 if (direction == "credit" and fid in EXPENSE_FAMILY_IDS) else 0
+    return (-weight, penalty)
+
+def _best_category(categories: list, direction: str = "credit") -> str:
+    """Retourne le label de catégorie principale (hors familles exclues).
+    En cas d'égalité de poids, les familles charges sont déprioritisées pour les crédits.
+    """
     if not categories:
         return ""
-    cats_sorted = sorted(categories, key=lambda c: float(c.get("weight", 0)), reverse=True)
+    cats_sorted = sorted(categories, key=lambda c: _cat_sort_key(c, direction))
     preferred   = [c for c in cats_sorted
                    if int((c.get("category_group") or {}).get("id", 0) or 0)
                    not in EXCLUDED_FAMILY_IDS]
@@ -94,9 +110,10 @@ def normalize_transaction(tx):
     direction = "credit" if amount >= 0 else "debit"
 
     # Catégorie principale : poids le plus élevé HORS familles exclues (cf. EXCLUDED_FAMILY_IDS)
+    # Tiebreaker : familles charges déprioritisées pour les crédits (cf. EXPENSE_FAMILY_IDS)
     cats = tx.get("categories") or []
     if cats:
-        cats_sorted   = sorted(cats, key=lambda c: float(c.get("weight", 0)), reverse=True)
+        cats_sorted   = sorted(cats, key=lambda c: _cat_sort_key(c, direction))
         preferred     = [c for c in cats_sorted
                          if int((c.get("category_group") or {}).get("id", 0) or 0)
                          not in EXCLUDED_FAMILY_IDS]

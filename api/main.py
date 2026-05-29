@@ -158,39 +158,107 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
         aggregated[key]["amount"]   += float(r["amount"] or 0)
         aggregated[key]["tx_count"] += int(r["tx_count"] or 0)
 
-    # Ligne "À catégoriser" : crédits avec category_name='Revenu' non encore mappés
-    # (transactions Pennylane sans catégorie produit assignée — hors P&L)
-    uncateg_total, uncateg_count = 0.0, 0
+    # ── Encaissements non catégorisés (crédits category='Revenu', hors P&L CA) ──
+    unc_rev_total, unc_rev_count = 0.0, 0
     pg = 0
     while True:
         batch = (
-            sb.table("transactions")
-            .select("amount")
+            sb.table("transactions").select("amount")
             .gte("date", d_from).lte("date", d_to)
-            .eq("category_name", "Revenu")
-            .eq("direction", "credit")
-            .range(pg * 1000, (pg + 1) * 1000 - 1)
-            .execute().data
+            .eq("category_name", "Revenu").eq("direction", "credit")
+            .range(pg * 1000, (pg + 1) * 1000 - 1).execute().data
         )
         for tx in batch:
-            uncateg_total += float(tx["amount"] or 0)
-            uncateg_count += 1
+            unc_rev_total += float(tx["amount"] or 0)
+            unc_rev_count += 1
         if len(batch) < 1000:
             break
         pg += 1
 
-    if uncateg_total > 0.5:
-        aggregated["_uncategorized"] = {
-            "poste_budgetaire": "⚠ À catégoriser",
+    if unc_rev_total > 0.5:
+        aggregated["_uncategorized_revenue"] = {
+            "poste_budgetaire": "⚠ Encaissements non catégorisés",
             "axe2_pole":        None,
-            "axe3_analytics":   "_uncategorized",
+            "axe3_analytics":   "_uncategorized_revenue",
             "pl_section":       1,
             "is_revenue":       True,
-            "amount":           round(uncateg_total, 2),
-            "tx_count":         uncateg_count,
+            "amount":           round(unc_rev_total, 2),
+            "tx_count":         unc_rev_count,
+        }
+
+    # ── Dépenses non catégorisées (débits category vide, hors P&L charges) ──
+    unc_exp_total, unc_exp_count = 0.0, 0
+    pg = 0
+    while True:
+        batch = (
+            sb.table("transactions").select("amount")
+            .gte("date", d_from).lte("date", d_to)
+            .eq("category_name", "").eq("direction", "debit")
+            .range(pg * 1000, (pg + 1) * 1000 - 1).execute().data
+        )
+        for tx in batch:
+            unc_exp_total += float(tx["amount"] or 0)
+            unc_exp_count += 1
+        if len(batch) < 1000:
+            break
+        pg += 1
+
+    if unc_exp_total > 0.5:
+        aggregated["_uncategorized_expenses"] = {
+            "poste_budgetaire": "⚠ Dépenses non catégorisées",
+            "axe2_pole":        None,
+            "axe3_analytics":   "_uncategorized_expenses",
+            "pl_section":       5,
+            "is_revenue":       False,
+            "amount":           round(unc_exp_total, 2),
+            "tx_count":         unc_exp_count,
         }
 
     return {"month": month, "data": sorted(aggregated.values(), key=lambda x: (x["pl_section"] or 9, x["poste_budgetaire"]))}
+
+
+@app.get("/api/uncategorized_detail")
+def get_uncategorized_detail(
+    month: str = Query(default=None),
+    ytd:   bool = Query(default=False),
+    type:  str  = Query(default="revenue"),   # "revenue" | "expenses"
+):
+    """Détail des transactions non catégorisées (pour modal drill-down + export)."""
+    today = date.today()
+    if ytd:
+        d_from = f"{today.year}-01-01"
+        d_to   = today.isoformat()
+    else:
+        month  = month or today.strftime("%Y-%m")
+        d_from, d_to = _month_range(month)
+
+    rows, pg = [], 0
+    while True:
+        if type == "revenue":
+            batch = (
+                sb.table("transactions")
+                .select("date,label,amount,direction,category_name,third_party")
+                .gte("date", d_from).lte("date", d_to)
+                .eq("category_name", "Revenu").eq("direction", "credit")
+                .order("date", desc=True)
+                .range(pg * 1000, (pg + 1) * 1000 - 1).execute().data
+            )
+        else:
+            batch = (
+                sb.table("transactions")
+                .select("date,label,amount,direction,category_name,third_party")
+                .gte("date", d_from).lte("date", d_to)
+                .eq("category_name", "").eq("direction", "debit")
+                .order("date", desc=True)
+                .range(pg * 1000, (pg + 1) * 1000 - 1).execute().data
+            )
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        pg += 1
+
+    total = sum(float(r["amount"] or 0) for r in rows)
+    return {"type": type, "data": rows, "total": round(total, 2), "count": len(rows)}
 
 
 @app.get("/api/evolution")

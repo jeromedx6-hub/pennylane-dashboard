@@ -97,8 +97,29 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 .pl-table tr.pl-row:hover td { background:rgba(99,102,241,.08); }
 .pl-table tr.pl-row td:first-child::after { content:' ↗'; font-size:9px; color:#475569; opacity:0; transition:opacity .12s; }
 .pl-table tr.pl-row:hover td:first-child::after { opacity:1; }
-.pl-table tr.uncateg-row td { color:#94a3b8; font-style:italic; border-top:1px dashed #2d3148; background:rgba(245,158,11,.03); }
+.pl-table tr.uncateg-row td { color:#94a3b8; font-style:italic; border-top:1px dashed #2d3148; background:rgba(245,158,11,.03); cursor:pointer; }
 .pl-table tr.uncateg-row td:first-child { color:#f59e0b; }
+.pl-table tr.uncateg-row:hover td { background:rgba(245,158,11,.07); }
+.pl-table tr.ca-total-row td { color:#94a3b8; font-style:italic; border-bottom:1px dashed #2d3148; background:rgba(99,102,241,.03); font-size:11px; }
+.pl-table tr.ca-total-row td:first-child { color:#818cf8; }
+.pl-table tr.uncateg-exp-row td { border-top:1px dashed #2d3148; border-bottom:1px dashed #2d3148; background:rgba(245,158,11,.04); cursor:pointer; }
+.pl-table tr.uncateg-exp-row:hover td { background:rgba(245,158,11,.1); }
+/* Modal uncatégorisé */
+#uncateg-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:9999; align-items:center; justify-content:center; }
+#uncateg-modal .um-box { background:#0f1117; border:1px solid #1e2340; border-radius:12px; width:min(860px,95vw); max-height:85vh; display:flex; flex-direction:column; }
+#uncateg-modal .um-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #1e2340; }
+#uncateg-modal .um-header h3 { margin:0; font-size:15px; color:#e2e8f0; }
+#uncateg-modal .um-header button { background:none; border:none; color:#64748b; font-size:18px; cursor:pointer; padding:4px 8px; }
+#uncateg-modal .um-header button:hover { color:#e2e8f0; }
+#uncateg-modal .um-toolbar { padding:12px 20px; border-bottom:1px solid #1e2340; display:flex; align-items:center; gap:12px; }
+#uncateg-modal .um-body { overflow-y:auto; padding:0 4px 16px; }
+#uncateg-modal table { width:100%; border-collapse:collapse; font-size:12px; }
+#uncateg-modal th { position:sticky; top:0; background:#0f1117; color:#64748b; font-weight:600; padding:8px 12px; text-align:left; border-bottom:1px solid #1e2340; }
+#uncateg-modal td { padding:7px 12px; border-bottom:1px solid #0d1025; color:#94a3b8; }
+#uncateg-modal tr:hover td { background:rgba(99,102,241,.06); }
+#uncateg-modal .um-total { padding:12px 20px; border-top:1px solid #1e2340; color:#64748b; font-size:12px; display:flex; justify-content:space-between; }
+.btn-export { background:rgba(99,102,241,.15); border:1px solid rgba(99,102,241,.3); color:#818cf8; font-size:12px; padding:6px 14px; border-radius:6px; cursor:pointer; font-weight:600; }
+.btn-export:hover { background:rgba(99,102,241,.25); }
 .positive { color:#4ade80 !important; }
 .negative { color:#f87171 !important; }
 .warn-text { color:#fb923c !important; }
@@ -541,6 +562,85 @@ async function loadSyncVersion() {
 }
 loadSyncVersion();
 
+// ── Modal transactions non catégorisées ──────────────────────
+let _uncategData = [];   // cache pour export CSV
+
+async function openUncategorizedModal(type) {
+  const m   = state.month || new Date().toISOString().slice(0,7);
+  const ytd = state.ytd ? '&ytd=true' : '';
+  const url = `${API}/api/uncategorized_detail?month=${m}${ytd}&type=${type}`;
+  const isRev = type === 'revenue';
+  const title = isRev ? '⚠ Encaissements non catégorisés' : '⚠ Dépenses non catégorisées';
+
+  document.getElementById('uncateg-modal-title').textContent = title;
+  document.getElementById('uncateg-modal-tbody').innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#475569">Chargement…</td></tr>';
+  document.getElementById('uncateg-modal-meta').textContent = '';
+  document.getElementById('uncateg-modal-footer').textContent = '';
+  document.getElementById('uncateg-modal').style.display = 'flex';
+
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    _uncategData = d.data || [];
+
+    document.getElementById('uncateg-modal-meta').textContent =
+      `${d.count} transaction${d.count>1?'s':''} · Total : ${fmtEur(d.total)}`;
+    document.getElementById('uncateg-modal-footer').textContent =
+      `${d.count} ligne${d.count>1?'s':''} · ${fmtEur(d.total)}`;
+
+    if (!_uncategData.length) {
+      document.getElementById('uncateg-modal-tbody').innerHTML =
+        '<tr><td colspan="5" style="text-align:center;padding:24px;color:#475569">Aucune transaction</td></tr>';
+      return;
+    }
+
+    let rows = '';
+    for (const tx of _uncategData) {
+      const sign  = tx.direction === 'credit' ? '+' : '−';
+      const color = tx.direction === 'credit' ? '#4ade80' : '#f87171';
+      const label = (tx.label || '').slice(0, 80) + ((tx.label||'').length > 80 ? '…' : '');
+      rows += `<tr>
+        <td style="white-space:nowrap">${tx.date}</td>
+        <td title="${(tx.label||'').replace(/"/g,'&quot;')}">${label}</td>
+        <td style="color:#94a3b8">${tx.third_party || '—'}</td>
+        <td style="text-align:right;color:${color};font-weight:600">${sign}${fmtEur(parseFloat(tx.amount||0))}</td>
+        <td style="color:#64748b;font-size:11px">${tx.category_name || '—'}</td>
+      </tr>`;
+    }
+    document.getElementById('uncateg-modal-tbody').innerHTML = rows;
+  } catch(e) {
+    document.getElementById('uncateg-modal-tbody').innerHTML =
+      `<tr><td colspan="5" style="text-align:center;padding:24px;color:#f87171">Erreur : ${e.message}</td></tr>`;
+  }
+}
+
+function closeUncategModal() {
+  document.getElementById('uncateg-modal').style.display = 'none';
+}
+
+function exportUncategorizedCSV() {
+  if (!_uncategData.length) return;
+  const header = ['Date','Libellé','Tiers','Direction','Montant','Catégorie'];
+  const lines  = [header.join(';')];
+  for (const tx of _uncategData) {
+    const sign = tx.direction === 'credit' ? 1 : -1;
+    lines.push([
+      tx.date,
+      `"${(tx.label||'').replace(/"/g,'""')}"`,
+      `"${(tx.third_party||'').replace(/"/g,'""')}"`,
+      tx.direction,
+      (sign * parseFloat(tx.amount||0)).toFixed(2).replace('.',','),
+      tx.category_name || '',
+    ].join(';'));
+  }
+  const blob = new Blob(['﻿' + lines.join('\n')], {type:'text/csv;charset=utf-8'});
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `non_categorise_${state.month||'ytd'}_${_uncategData[0]?.direction==='credit'?'encaissements':'depenses'}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ── Fetch ────────────────────────────────────────────────────
 async function fetchAll() {
   const m   = state.month;
@@ -792,9 +892,13 @@ function renderPL(plData, kpis) {
   const mcs = { 2: kpis.mc1, 3: kpis.mc2, 4: kpis.marge_brute, 5: kpis.ebitda };
   const mcPcts = { 2: kpis.mc1_pct, 3: kpis.mc2_pct, 4: kpis.marge_brute_pct, 5: kpis.ebitda_pct };
 
-  // Séparer la ligne "À catégoriser" du reste (hors P&L normal)
-  const uncategRow = plData.find(r => r.axe3_analytics === '_uncategorized');
-  const normalData = plData.filter(r => r.axe3_analytics !== '_uncategorized');
+  // Séparer les lignes spéciales hors P&L
+  const uncategRev = plData.find(r => r.axe3_analytics === '_uncategorized_revenue')
+                  || plData.find(r => r.axe3_analytics === '_uncategorized'); // compat ancien
+  const uncategExp = plData.find(r => r.axe3_analytics === '_uncategorized_expenses');
+  const normalData = plData.filter(r =>
+    !['_uncategorized_revenue','_uncategorized_expenses','_uncategorized'].includes(r.axe3_analytics)
+  );
 
   // Grouper par section
   const bySection = {};
@@ -822,9 +926,9 @@ function renderPL(plData, kpis) {
     }
 
     if (s > 1 && mcs[s] !== undefined) {
-      // Ligne total coûts de la section — cliquable
       const TOTAL_LABELS = { 2:'Total Coûts Acquisition', 3:'Total Sales & Closing', 4:'Total Opérationnel', 5:'Total Structure' };
       const sectionTotal = rows.filter(r => !r.is_revenue).reduce((sum,r) => sum + Math.abs(r.amount), 0);
+      const isEbitda = s === 5;
       if (sectionTotal > 0) {
         const lbl = JSON.stringify(TOTAL_LABELS[s]).replace(/"/g,'&quot;');
         html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(${s}, ${lbl}, false)">
@@ -833,10 +937,18 @@ function renderPL(plData, kpis) {
           <td>${fmt(sectionTotal/ca*100,1)}%</td>
         </tr>`;
       }
-      // Ligne marge
+      // Bandeau dépenses non catégorisées — entre Total Structure et EBITDA
+      if (isEbitda && uncategExp && uncategExp.amount > 0) {
+        html += `<tr class="uncateg-exp-row" onclick="openUncategorizedModal('expenses')">
+          <td>⚠ <strong style="color:#f59e0b">Dépenses non catégorisées</strong>
+              <span style="font-size:10px;color:#64748b;font-weight:400;margin-left:6px">${uncategExp.tx_count} tx · hors P&L · cliquer pour détail</span></td>
+          <td style="color:#f59e0b;font-weight:600">— ${fmtEur(uncategExp.amount)}</td>
+          <td style="color:#64748b">${fmt(uncategExp.amount/ca*100,1)}%</td>
+        </tr>`;
+      }
+      // Ligne marge / EBITDA
       const mc  = mcs[s];
       const cls = mc >= 0 ? 'positive' : 'negative';
-      const isEbitda = s === 5;
       html += `<tr class="${isEbitda ? 'ebitda-row' : 'mc-row'}">
         <td>${MC_LABELS[s]}</td>
         <td class="${cls}">${fmtEur(mc)}</td>
@@ -846,12 +958,20 @@ function renderPL(plData, kpis) {
       html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(1, 'TOTAL CA HT', true)">
         <td>TOTAL CA HT</td><td class="positive">${fmtEur(kpis.ca_ht)}</td><td>100%</td>
       </tr>`;
-      // Ligne "À catégoriser" — informative, hors P&L, après TOTAL CA HT
-      if (uncategRow && uncategRow.amount > 0) {
-        html += `<tr class="uncateg-row">
-          <td>⚠ À catégoriser <span style="font-size:10px;color:#64748b;font-style:normal">(${uncategRow.tx_count} tx · hors P&L)</span></td>
-          <td style="color:#f59e0b">${fmtEur(uncategRow.amount)}</td>
-          <td style="color:#64748b">${fmt(uncategRow.amount/ca*100,1)}%</td>
+      // Encaissements non catégorisés — après TOTAL CA HT
+      if (uncategRev && uncategRev.amount > 0) {
+        html += `<tr class="uncateg-row" onclick="openUncategorizedModal('revenue')">
+          <td>⚠ Encaissements non catégorisés
+              <span style="font-size:10px;color:#64748b;font-style:normal;margin-left:6px">${uncategRev.tx_count} tx · hors P&L · cliquer pour détail</span></td>
+          <td style="color:#f59e0b">${fmtEur(uncategRev.amount)}</td>
+          <td style="color:#64748b">${fmt(uncategRev.amount/ca*100,1)}%</td>
+        </tr>`;
+        // Ligne CA total potentiel
+        const caTotal = kpis.ca_ht + uncategRev.amount;
+        html += `<tr class="ca-total-row">
+          <td>↳ CA total potentiel (catégorisé + non catégorisé)</td>
+          <td class="positive">${fmtEur(caTotal)}</td>
+          <td style="color:#64748b">—</td>
         </tr>`;
       }
     }
@@ -1829,6 +1949,38 @@ function showToast(msg, type = 'success') {
       <div style="font-size:28px;margin-bottom:12px"><span class="spin" style="display:inline-block">⟳</span></div>
       <div id="sync-progress-label" style="color:#94a3b8;font-size:13px"></div>
       <div style="font-size:11px;color:#475569;margin-top:8px">Récupération Pennylane · Calcul P&L · KPIs…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal transactions non catégorisées ───────────────── -->
+<div id="uncateg-modal" onclick="if(event.target===this)closeUncategModal()">
+  <div class="um-box">
+    <div class="um-header">
+      <h3 id="uncateg-modal-title">Transactions non catégorisées</h3>
+      <button onclick="closeUncategModal()">✕</button>
+    </div>
+    <div class="um-toolbar">
+      <button class="btn-export" onclick="exportUncategorizedCSV()">⬇ Exporter CSV</button>
+      <span id="uncateg-modal-meta" style="color:#64748b;font-size:12px"></span>
+    </div>
+    <div class="um-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Libellé</th>
+            <th>Tiers</th>
+            <th style="text-align:right">Montant</th>
+            <th>Catégorie</th>
+          </tr>
+        </thead>
+        <tbody id="uncateg-modal-tbody"></tbody>
+      </table>
+    </div>
+    <div class="um-total">
+      <span id="uncateg-modal-footer"></span>
+      <span style="color:#94a3b8">Données Pennylane</span>
     </div>
   </div>
 </div>

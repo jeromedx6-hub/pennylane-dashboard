@@ -144,19 +144,30 @@ def get_kpis(month: str = Query(default=None), ytd: bool = Query(default=False))
     def pct(val):
         return round(val / ca * 100, 2) if ca else 0
 
-    # pl_daily complet : ROAS (pub) + tx_count total — une seule requête
-    pl_all = (
+    # ROAS : recalculé depuis pl_daily mensuel (pub payée en lump sum, pas quotidien)
+    pl_pub = (
         sb.table("pl_daily")
-        .select("amount,tx_count,axe3_analytics")
+        .select("amount")
         .gte("date", d_from)
         .lte("date", d_to)
+        .in_("axe3_analytics", ["Pub_Meta", "Pub_Event", "Affiliés"])
         .execute()
         .data
     )
-    PUB = {"Pub_Meta", "Pub_Event", "Affiliés"}
-    total_pub = sum(abs(float(r["amount"] or 0)) for r in pl_all if r.get("axe3_analytics") in PUB)
+    total_pub = sum(abs(float(r["amount"] or 0)) for r in pl_pub)
     roas = round(ca / total_pub, 2) if total_pub else None
-    tx_total_count = int(sum(r.get("tx_count") or 0 for r in pl_all))
+
+    # Nombre total de transactions brutes (COUNT sans fetch de données)
+    try:
+        res = (sb.table("transactions")
+               .select("*", count="exact")
+               .gte("date", d_from)
+               .lte("date", d_to)
+               .limit(0)
+               .execute())
+        tx_total_count = res.count or 0
+    except Exception:
+        tx_total_count = 0
 
     data = {
         "ca_ht":             round(ca, 2),

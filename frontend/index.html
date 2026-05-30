@@ -332,10 +332,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="card">
     <div class="card-header">
       <div>
-        <div class="card-title">
-          P&L Analytique · Synthèse
-          <span id="pl-tx-count" style="font-size:11px;font-weight:400;color:#475569;margin-left:8px"></span>
-        </div>
+        <div class="card-title">P&L Analytique · Synthèse</div>
         <div class="card-sub" id="pl-sub">Ce mois</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
@@ -774,14 +771,11 @@ function renderAll() {
   const periodLbl = state.ytd ? `YTD ${state.month.slice(0,4)}` : monthLabel(state.month);
   document.getElementById('sync-time').textContent   = `Sync OK · ${now}`;
   document.getElementById('last-sync').textContent   = `Dernière sync · ${now}`;
-  document.getElementById('pl-sub').textContent      = periodLbl;
+  const txCnt   = d?.tx_count || 0;
+  const txSuffix = txCnt > 0 ? ` (${txCnt.toLocaleString('fr-FR')} transactions)` : '';
+  document.getElementById('pl-sub').textContent      = periodLbl + txSuffix;
   document.getElementById('ratios-sub').textContent  = periodLbl;
   document.getElementById('charges-sub').textContent = periodLbl;
-
-  // Nb transactions de la sélection
-  const txCnt = d?.tx_count || 0;
-  const txEl  = document.getElementById('pl-tx-count');
-  if (txEl && txCnt > 0) txEl.textContent = `(${txCnt.toLocaleString('fr-FR')} transactions)`;
 
   // Synchroniser tabs Mois/YTD avec l'état
   const tabM = document.getElementById('tab-month');

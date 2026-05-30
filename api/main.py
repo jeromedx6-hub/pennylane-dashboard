@@ -1,5 +1,6 @@
 import csv
 import io
+import logging
 import os
 import re
 import sys as _sys
@@ -156,16 +157,8 @@ def get_kpis(month: str = Query(default=None), ytd: bool = Query(default=False))
     total_pub = sum(abs(float(r["amount"] or 0)) for r in pl_pub)
     roas = round(ca / total_pub, 2) if total_pub else None
 
-    # Nombre total de transactions brutes sur la période
-    try:
-        tx_count_res = (sb.table("transactions")
-                        .select("id", count="exact")
-                        .gte("date", d_from)
-                        .lte("date", d_to)
-                        .execute())
-        tx_total_count = tx_count_res.count or 0
-    except Exception:
-        tx_total_count = 0
+    # Nombre total de transactions (sommé depuis kpis_daily déjà chargé — pas de requête supplémentaire)
+    tx_total_count = int(sum(r.get("tx_count") or 0 for r in rows))
 
     data = {
         "ca_ht":             round(ca, 2),

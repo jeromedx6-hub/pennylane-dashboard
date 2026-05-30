@@ -1,10 +1,14 @@
+import csv
+import io
 import os
 import re
 import sys as _sys
 import threading
+import calendar as _cal
 from collections import defaultdict
 from datetime import date, timedelta, datetime as _dt
 from fastapi import FastAPI, Query
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
@@ -152,6 +156,17 @@ def get_kpis(month: str = Query(default=None), ytd: bool = Query(default=False))
     total_pub = sum(abs(float(r["amount"] or 0)) for r in pl_pub)
     roas = round(ca / total_pub, 2) if total_pub else None
 
+    # Nombre total de transactions brutes sur la période
+    try:
+        tx_count_res = (sb.table("transactions")
+                        .select("id", count="exact")
+                        .gte("date", d_from)
+                        .lte("date", d_to)
+                        .execute())
+        tx_total_count = tx_count_res.count or 0
+    except Exception:
+        tx_total_count = 0
+
     data = {
         "ca_ht":             round(ca, 2),
         "total_charges":     round(s("total_charges"), 2),
@@ -168,6 +183,7 @@ def get_kpis(month: str = Query(default=None), ytd: bool = Query(default=False))
         "ebitda":            round(s("ebitda"), 2),
         "ebitda_pct":        pct(s("ebitda")),
         "roas_cash":         roas,
+        "tx_count":          tx_total_count,
     }
     return {"month": month, "data": data}
 
@@ -975,6 +991,176 @@ def get_alerts(days: int = Query(default=30)):
             "data":  recent_changes[:30],
         },
     }
+
+
+@app.get("/api/mapping_status")
+def get_mapping_status(month: str = Query(default=None)):
+    """
+    Statut du mapping catégories par section P&L pour un mois donné.
+    Retourne pour chaque section : nb catégories actives / total + détail par catégorie.
+    Permet de détecter les sections vides et les catégories non mappées.
+    """
+    if not month:
+        month = date.today().strftime("%Y-%m")
+
+    year, mo  = int(month[:4]), int(month[5:7])
+    last_day  = _cal.monthrange(year, mo)[1]
+    d_from    = f"{month}-01"
+    d_to      = f"{month}-{last_day:02d}"
+
+    # Mapping complet
+    mapping_data = sb.table("category_mapping").select("*").execute().data
+
+    # Stats transactions du mois (pagination)
+    tx_stats: dict = {}
+    page = 0
+    while True:
+        batch = (sb.table("transactions")
+                 .select("category_name,amount,direction")
+                 .gte("date", d_from)
+                 .lte("date", d_to)
+                 .range(page * 1000, (page + 1) * 1000 - 1)
+                 .execute().data)
+        for tx in batch:
+            cn  = tx.get("category_name") or ""
+            amt = float(tx.get("amount") or 0)
+            d   = tx.get("direction", "")
+            if cn not in tx_stats:
+                tx_stats[cn] = {"nb": 0, "credit": 0.0, "debit": 0.0}
+            tx_stats[cn]["nb"] += 1
+            if d == "credit":
+                tx_stats[cn]["credit"] += amt
+            else:
+                tx_stats[cn]["debit"] += amt
+        if len(batch) < 1000:
+            break
+        page += 1
+
+    SECTION_NAMES = {
+        1: "CA / Revenus",
+        2: "Coûts Acquisition",
+        3: "Sales & Closing",
+        4: "Coûts Delivery",
+        5: "Structure",
+    }
+
+    # Grouper par section
+    by_section: dict = defaultdict(list)
+    for m in mapping_data:
+        sec = m.get("pl_section")
+        if sec:
+            by_section[sec].append(m)
+
+    sections = []
+    for sec in sorted(by_section.keys()):
+        entries = by_section[sec]
+        cats = []
+        for m in entries:
+            cn    = m["pennylane_category_name"]
+            stats = tx_stats.get(cn, {"nb": 0, "credit": 0.0, "debit": 0.0})
+            cats.append({
+                "name":   cn,
+                "poste":  m["poste_budgetaire"],
+                "nb_tx":  stats["nb"],
+                "credit": round(stats["credit"], 2),
+                "debit":  round(stats["debit"], 2),
+                "active": stats["nb"] > 0,
+            })
+        active_count = sum(1 for c in cats if c["active"])
+        sections.append({
+            "id":           sec,
+            "name":         SECTION_NAMES.get(sec, f"Section {sec}"),
+            "categories":   sorted(cats, key=lambda x: -x["nb_tx"]),
+            "active_count": active_count,
+            "total_count":  len(cats),
+            "all_ok":       active_count == len(cats),
+            "empty":        active_count == 0,
+        })
+
+    # Catégories Pennylane non mappées (hors familles techniques)
+    IGNORED = {"Suivi de trésorerie", "Test", "Test 156",
+               "Transfert interne", "TVA", "Pole Marketing"}
+    try:
+        unmapped_pl = (sb.table("pennylane_categories")
+                       .select("id,label,family_label,first_seen")
+                       .eq("is_mapped", False)
+                       .order("family_label")
+                       .execute().data)
+        unmapped_pl = [c for c in unmapped_pl
+                       if c.get("family_label") not in IGNORED]
+    except Exception:
+        unmapped_pl = []
+
+    total_cats   = sum(s["total_count"]  for s in sections)
+    total_active = sum(s["active_count"] for s in sections)
+
+    return {
+        "month":              month,
+        "total_mapped":       total_cats,
+        "total_active":       total_active,
+        "sections":           sections,
+        "unmapped_pennylane": unmapped_pl,
+    }
+
+
+@app.get("/api/export_transactions")
+def export_transactions(month: str = Query(default=None),
+                        ytd:   bool = Query(default=False)):
+    """
+    Export CSV de toutes les transactions de la période sélectionnée.
+    month=YYYY-MM  → transactions du mois
+    ytd=true       → transactions Jan 1 → aujourd'hui
+    """
+    today = date.today()
+    if ytd:
+        d_from    = f"{today.year}-01-01"
+        d_to      = today.isoformat()
+        filename  = f"transactions_YTD_{today.year}.csv"
+    else:
+        month  = month or today.strftime("%Y-%m")
+        d_from, d_to = _month_range(month)
+        filename = f"transactions_{month}.csv"
+
+    # Pagination complète
+    rows, page = [], 0
+    while True:
+        batch = (sb.table("transactions")
+                 .select("date,label,amount,direction,category_name,family_id,third_party,account_name")
+                 .gte("date", d_from)
+                 .lte("date", d_to)
+                 .order("date", desc=True)
+                 .range(page * 1000, (page + 1) * 1000 - 1)
+                 .execute().data)
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        page += 1
+
+    # Construire le CSV (BOM UTF-8 pour Excel)
+    output = io.StringIO()
+    output.write("﻿")   # BOM
+    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_ALL)
+    writer.writerow(["Date", "Libellé", "Montant (€)", "Sens",
+                     "Catégorie", "Tiers", "Compte"])
+    for r in rows:
+        amt    = float(r.get("amount") or 0)
+        signed = amt if r.get("direction") == "credit" else -amt
+        writer.writerow([
+            r.get("date", ""),
+            r.get("label", ""),
+            f"{signed:.2f}".replace(".", ","),
+            r.get("direction", ""),
+            r.get("category_name", ""),
+            r.get("third_party", ""),
+            r.get("account_name", ""),
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/release_notes")

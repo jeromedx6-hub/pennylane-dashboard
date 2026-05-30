@@ -244,6 +244,10 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     <span>⚠ &nbsp;Alertes</span>
     <span id="alert-badge" class="alert-nav-badge" style="display:none">0</span>
   </div>
+  <div class="nav-item" onclick="showPage('mapping', this)" id="nav-mapping" style="justify-content:space-between">
+    <span>⬡ &nbsp;Mapping</span>
+    <span id="mapping-badge" class="alert-nav-badge" style="display:none;background:#f59e0b">0</span>
+  </div>
   <div class="nav-item" onclick="showPage('release', this)">📋 &nbsp;Release Notes</div>
   <div class="sidebar-bottom">
     <div class="client-badge">
@@ -327,10 +331,25 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <!-- P&L pleine largeur -->
   <div class="card">
     <div class="card-header">
-      <div><div class="card-title">P&L Analytique · Synthèse</div><div class="card-sub" id="pl-sub">Ce mois</div></div>
-      <div class="tabs">
-        <button class="tab active" onclick="switchPL('month',this)">Mois</button>
-        <button class="tab" onclick="switchPL('ytd',this)">YTD</button>
+      <div>
+        <div class="card-title">
+          P&L Analytique · Synthèse
+          <span id="pl-tx-count" style="font-size:11px;font-weight:400;color:#475569;margin-left:8px"></span>
+        </div>
+        <div class="card-sub" id="pl-sub">Ce mois</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button id="pl-export-btn" onclick="exportTransactions()"
+          title="Télécharger toutes les transactions de la sélection"
+          style="display:flex;align-items:center;gap:6px;background:#1e2235;border:1px solid #2d3148;border-radius:8px;padding:6px 12px;cursor:pointer;color:#94a3b8;font-size:12px;transition:all .15s"
+          onmouseover="this.style.borderColor='#6366f1';this.style.color='#e2e8f0'"
+          onmouseout="this.style.borderColor='#2d3148';this.style.color='#94a3b8'">
+          ↓ Export CSV
+        </button>
+        <div class="tabs">
+          <button class="tab active" id="tab-month" onclick="switchPL('month',this)">Mois</button>
+          <button class="tab" id="tab-ytd" onclick="switchPL('ytd',this)">YTD</button>
+        </div>
       </div>
     </div>
     <!-- Indicateur général non catégorisés (mis à jour par renderPL) -->
@@ -473,6 +492,55 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   </div>
 
 </div><!-- /page-alertes -->
+
+<!-- ════ PAGE : MAPPING ════════════════════════════════════ -->
+<div id="page-mapping" class="page" style="display:none">
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">Mapping <span>Catégories</span></div>
+      <div class="header-sub">Statut du mapping Pennylane → P&L par section · mis à jour à chaque sync</div>
+    </div>
+    <div class="header-right">
+      <input type="month" id="mapping-month"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"
+        onchange="loadMappingStatus()">
+      <div class="sync-badge"><div class="dot"></div><span id="mapping-sync-label">—</span></div>
+      <button class="sync-btn" onclick="loadMappingStatus()">⟳ Rafraîchir</button>
+    </div>
+  </div>
+
+  <!-- KPI row -->
+  <div id="mapping-kpi-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+    <div class="kpi-card blue"><div class="kpi-label">Catégories mappées</div><div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div></div>
+    <div class="kpi-card green"><div class="kpi-label">Actives ce mois</div><div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div></div>
+    <div class="kpi-card orange"><div class="kpi-label">Sans transaction</div><div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div></div>
+    <div class="kpi-card red"><div class="kpi-label">Non mappées (hors excl.)</div><div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div></div>
+  </div>
+
+  <!-- Sections P&L -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-header">
+      <div>
+        <div class="card-title">📊 Statut par section P&L</div>
+        <div class="card-sub">Cliquer sur une section pour voir le détail des catégories</div>
+      </div>
+    </div>
+    <div id="mapping-sections-body"><div style="color:#475569;text-align:center;padding:30px">Chargement…</div></div>
+  </div>
+
+  <!-- Catégories non mappées -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">🆕 Catégories Pennylane sans mapping P&L</div>
+        <div class="card-sub">Présentes dans Pennylane mais ignorées par le superviseur (hors familles techniques)</div>
+      </div>
+    </div>
+    <div id="mapping-unmapped-body"><div style="color:#475569;text-align:center;padding:30px">Chargement…</div></div>
+  </div>
+
+</div><!-- /page-mapping -->
 
 <!-- ════ PAGE : RELEASE NOTES ══════════════════════════════ -->
 <div id="page-release" class="page" style="display:none">
@@ -704,11 +772,24 @@ function renderAll() {
 
   const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   const periodLbl = state.ytd ? `YTD ${state.month.slice(0,4)}` : monthLabel(state.month);
-  document.getElementById('sync-time').textContent  = `Sync OK · ${now}`;
-  document.getElementById('last-sync').textContent  = `Dernière sync · ${now}`;
-  document.getElementById('pl-sub').textContent     = periodLbl;
-  document.getElementById('ratios-sub').textContent = periodLbl;
+  document.getElementById('sync-time').textContent   = `Sync OK · ${now}`;
+  document.getElementById('last-sync').textContent   = `Dernière sync · ${now}`;
+  document.getElementById('pl-sub').textContent      = periodLbl;
+  document.getElementById('ratios-sub').textContent  = periodLbl;
   document.getElementById('charges-sub').textContent = periodLbl;
+
+  // Nb transactions de la sélection
+  const txCnt = d?.tx_count || 0;
+  const txEl  = document.getElementById('pl-tx-count');
+  if (txEl && txCnt > 0) txEl.textContent = `(${txCnt.toLocaleString('fr-FR')} transactions)`;
+
+  // Synchroniser tabs Mois/YTD avec l'état
+  const tabM = document.getElementById('tab-month');
+  const tabY = document.getElementById('tab-ytd');
+  if (tabM && tabY) {
+    tabM.classList.toggle('active',  !state.ytd);
+    tabY.classList.toggle('active',  !!state.ytd);
+  }
 }
 
 function renderNoData() {
@@ -1103,6 +1184,36 @@ function onComboChange(val) {
 function switchPL(mode, btn) {
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
+  const today = new Date();
+  const year  = today.getFullYear();
+  if (mode === 'ytd') {
+    state.ytd   = true;
+    state.month = currentMonth();
+    const combo = document.getElementById('month-combo');
+    if (combo) combo.value = `ytd-${year}`;
+  } else {
+    state.ytd   = false;
+    const combo = document.getElementById('month-combo');
+    if (combo && combo.value.startsWith('ytd-')) {
+      combo.value = currentMonth();
+      state.month = currentMonth();
+    }
+  }
+  fetchAll();
+}
+
+function exportTransactions() {
+  const ytd  = state.ytd;
+  const month = state.month;
+  const url  = ytd
+    ? `${API}/api/export_transactions?ytd=true`
+    : `${API}/api/export_transactions?month=${month}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = ytd ? `transactions_YTD_${month.slice(0,4)}.csv` : `transactions_${month}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 // ── Modal ────────────────────────────────────────────────────
@@ -1503,6 +1614,7 @@ function showPage(page, el) {
   if (el) el.classList.add('active');
   if (page === 'kpi'     && !kpiState.date_from) initKpiPage();
   if (page === 'alertes') loadAlerts();
+  if (page === 'mapping') loadMappingStatus();
   if (page === 'release') loadReleaseNotes();
 }
 
@@ -1525,27 +1637,31 @@ async function loadAlerts() {
 }
 
 function renderAlerts(json) {
-  const unmappedTx   = json.unmapped_transactions || [];
-  const unmappedCats = json.unmapped_categories   || [];
-  const catChanges   = json.cat_changes            || [];
+  // Extraire les tableaux des objets imbriqués
+  const unmappedTx   = (json.unmapped_transactions  || {}).by_category || [];
+  const unmappedCats = (json.unmapped_categories     || {}).data        || [];
+  const catChanges   = (json.cat_changes             || {}).data        || [];
+  const txCount      = (json.unmapped_transactions   || {}).count       || unmappedTx.length;
+  const catCount     = (json.unmapped_categories     || {}).count       || unmappedCats.length;
+  const chgCount     = (json.cat_changes             || {}).count       || catChanges.length;
 
   // KPI row
   const kpiRow = document.getElementById('alerts-kpi-row');
   if (kpiRow) kpiRow.innerHTML = `
-    <div class="kpi-card ${unmappedTx.length>0?'red':'green'}">
+    <div class="kpi-card ${txCount>0?'red':'green'}">
       <div class="kpi-label">Transactions non mappées</div>
-      <div class="kpi-value">${unmappedTx.length}</div>
-      <div class="kpi-deltas"><span style="font-size:11px;color:${unmappedTx.length>0?'#f87171':'#4ade80'}">${unmappedTx.length>0?'⚠ Action requise':'✓ Aucun problème'}</span></div>
+      <div class="kpi-value">${txCount}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:${txCount>0?'#f87171':'#4ade80'}">${txCount>0?'⚠ Action requise':'✓ Aucun problème'}</span></div>
     </div>
-    <div class="kpi-card ${unmappedCats.length>0?'orange':'green'}">
+    <div class="kpi-card ${catCount>0?'orange':'green'}">
       <div class="kpi-label">Catégories non mappées</div>
-      <div class="kpi-value">${unmappedCats.length}</div>
-      <div class="kpi-deltas"><span style="font-size:11px;color:${unmappedCats.length>0?'#fb923c':'#4ade80'}">${unmappedCats.length>0?'⚠ À mapper':'✓ Tout mappé'}</span></div>
+      <div class="kpi-value">${catCount}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:${catCount>0?'#fb923c':'#4ade80'}">${catCount>0?'⚠ À mapper':'✓ Tout mappé'}</span></div>
     </div>
     <div class="kpi-card blue">
       <div class="kpi-label">Recatégorisations</div>
-      <div class="kpi-value">${catChanges.length}</div>
-      <div class="kpi-deltas"><span style="font-size:11px;color:#60a5fa">${catChanges.length>0?'🔄 Mises à jour détectées':'✓ Aucun changement'}</span></div>
+      <div class="kpi-value">${chgCount}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:#60a5fa">${chgCount>0?'🔄 Mises à jour détectées':'✓ Aucun changement'}</span></div>
     </div>`;
 
   // Section 1 — transactions non mappées
@@ -1558,14 +1674,13 @@ function renderAlerts(json) {
         <div class="alert-card lvl-high">
           <div class="alert-icon red">⚠</div>
           <div class="alert-content">
-            <div class="alert-title">${tx.category_name || '(Sans catégorie)'}</div>
+            <div class="alert-title">${tx.category || '(Sans catégorie)'}</div>
             <div class="alert-meta">${tx.count} transaction${tx.count>1?'s':''} · Dernière : ${tx.last_date||'—'}</div>
             <div class="alert-chips">
-              ${tx.family_name ? `<span class="alert-chip">Famille : ${tx.family_name}</span>` : ''}
-              ${tx.sample_label ? `<span class="alert-chip">Ex : ${tx.sample_label.slice(0,45)}${tx.sample_label.length>45?'…':''}</span>` : ''}
+              ${tx.sample ? `<span class="alert-chip">Ex : ${tx.sample.slice(0,50)}${tx.sample.length>50?'…':''}</span>` : ''}
             </div>
           </div>
-          <div class="alert-amount">— ${fmtEur(Math.abs(tx.total_amount||0))}</div>
+          <div class="alert-amount">— ${fmtEur(Math.abs(tx.total||0))}</div>
         </div>`).join('');
     }
   }
@@ -1609,6 +1724,145 @@ function renderAlerts(json) {
             </div>
           </div>
           <div class="alert-amount" style="color:#a78bfa">${ch.amount ? fmtEur(Math.abs(ch.amount)) : '—'}</div>
+        </div>`).join('');
+    }
+  }
+}
+
+// ── Mapping Status ─────────────────────────────────────────────
+async function loadMappingStatus() {
+  const monthEl = document.getElementById('mapping-month');
+  const month   = monthEl?.value || new Date().toISOString().slice(0,7);
+  if (monthEl && !monthEl.value) monthEl.value = month;
+  try {
+    const res  = await fetch(`${API}/api/mapping_status?month=${month}`);
+    const json = await res.json();
+    renderMappingStatus(json);
+    // Badge sidebar
+    const unmappedCount = (json.unmapped_pennylane || []).length;
+    const inactiveCount = json.total_mapped - json.total_active;
+    const total = unmappedCount + (inactiveCount > 0 ? 1 : 0);
+    const badge = document.getElementById('mapping-badge');
+    if (badge) { badge.textContent = unmappedCount; badge.style.display = unmappedCount > 0 ? '' : 'none'; }
+    const lbl = document.getElementById('mapping-sync-label');
+    if (lbl) lbl.textContent = `${json.total_active}/${json.total_mapped} actives · ${month}`;
+  } catch(e) {
+    console.error('loadMappingStatus error', e);
+  }
+}
+
+function renderMappingStatus(json) {
+  const sections     = json.sections             || [];
+  const unmappedPL   = json.unmapped_pennylane   || [];
+  const totalMapped  = json.total_mapped         || 0;
+  const totalActive  = json.total_active         || 0;
+  const totalInact   = totalMapped - totalActive;
+
+  // KPI row
+  const kpiRow = document.getElementById('mapping-kpi-row');
+  if (kpiRow) kpiRow.innerHTML = `
+    <div class="kpi-card blue">
+      <div class="kpi-label">Catégories mappées</div>
+      <div class="kpi-value">${totalMapped}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:#60a5fa">Total dans le P&L</span></div>
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-label">Actives ce mois</div>
+      <div class="kpi-value">${totalActive}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:#4ade80">${Math.round(totalActive/totalMapped*100)}% du mapping</span></div>
+    </div>
+    <div class="kpi-card ${totalInact>0?'orange':'green'}">
+      <div class="kpi-label">Sans transaction</div>
+      <div class="kpi-value">${totalInact}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:${totalInact>0?'#fb923c':'#4ade80'}">${totalInact>0?'⚠ Sections potentiellement vides':'✓ Tout actif'}</span></div>
+    </div>
+    <div class="kpi-card ${unmappedPL.length>0?'red':'green'}">
+      <div class="kpi-label">Non mappées (hors excl.)</div>
+      <div class="kpi-value">${unmappedPL.length}</div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:${unmappedPL.length>0?'#f87171':'#4ade80'}">${unmappedPL.length>0?'⚠ Absentes du P&L':'✓ Aucune nouvelle'}</span></div>
+    </div>`;
+
+  // Sections
+  const secBody = document.getElementById('mapping-sections-body');
+  if (secBody) {
+    const SEC_COLORS = {1:'#4ade80',2:'#60a5fa',3:'#a78bfa',4:'#fb923c',5:'#94a3b8'};
+    secBody.innerHTML = sections.map(sec => {
+      const pct    = sec.total_count > 0 ? Math.round(sec.active_count / sec.total_count * 100) : 0;
+      const color  = sec.empty ? '#f87171' : sec.all_ok ? '#4ade80' : '#fb923c';
+      const icon   = sec.empty ? '🔴' : sec.all_ok ? '✅' : '🟡';
+      const inact  = sec.categories.filter(c => !c.active);
+      const active = sec.categories.filter(c =>  c.active);
+
+      const inactHTML = inact.length ? `
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid #2d3148">
+          <div style="font-size:10px;color:#475569;margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">Sans transaction ce mois</div>
+          ${inact.map(c => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1e2235">
+              <span style="color:#64748b;font-size:11px">⚠ ${c.name}</span>
+              <span style="font-size:10px;color:#475569">${c.poste}</span>
+            </div>`).join('')}
+        </div>` : '';
+
+      const actHTML = active.length ? active.slice(0,8).map(c => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1e2235">
+          <span style="color:#94a3b8;font-size:11px">✓ ${c.name}</span>
+          <span style="font-size:11px;color:#4ade80;font-weight:600">${c.nb_tx} tx</span>
+        </div>`).join('') : '';
+
+      return `
+      <details style="margin-bottom:10px;background:#12141e;border:1px solid #2d3148;border-radius:10px;overflow:hidden">
+        <summary style="padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;list-style:none;user-select:none">
+          <span style="font-size:16px">${icon}</span>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600;color:#e2e8f0">Section ${sec.id} — ${sec.name}</div>
+            <div style="font-size:11px;color:#475569;margin-top:2px">${sec.active_count} / ${sec.total_count} catégories actives ce mois</div>
+          </div>
+          <div style="text-align:right;min-width:80px">
+            <div style="font-size:18px;font-weight:700;color:${color}">${pct}%</div>
+            <div style="font-size:10px;color:#475569">actif</div>
+          </div>
+          <div style="width:80px;height:6px;background:#1e2235;border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width .4s"></div>
+          </div>
+        </summary>
+        <div style="padding:12px 16px 16px;border-top:1px solid #2d3148">
+          ${actHTML}
+          ${active.length > 8 ? `<div style="font-size:10px;color:#475569;padding:4px 0">+ ${active.length-8} autres catégories actives</div>` : ''}
+          ${inactHTML}
+        </div>
+      </details>`;
+    }).join('');
+  }
+
+  // Catégories non mappées
+  const unmBody = document.getElementById('mapping-unmapped-body');
+  if (unmBody) {
+    if (!unmappedPL.length) {
+      unmBody.innerHTML = `<div style="text-align:center;padding:30px;color:#4ade80;font-size:13px">✓ Toutes les catégories Pennylane pertinentes sont mappées dans le P&L</div>`;
+    } else {
+      // Grouper par famille
+      const byFam = {};
+      unmappedPL.forEach(c => {
+        const f = c.family_label || 'Autre';
+        if (!byFam[f]) byFam[f] = [];
+        byFam[f].push(c);
+      });
+      unmBody.innerHTML = Object.entries(byFam).map(([fam, cats]) => `
+        <div style="margin-bottom:14px">
+          <div style="font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #2d3148">
+            ${fam} <span style="color:#475569;font-weight:400">(${cats.length})</span>
+          </div>
+          ${cats.map(c => `
+            <div class="alert-card lvl-medium" style="margin-bottom:6px">
+              <div class="alert-icon orange" style="font-size:13px">🆕</div>
+              <div class="alert-content">
+                <div class="alert-title">${c.label}</div>
+                <div class="alert-meta">Famille : ${c.family_label||'N/A'} · Détectée le ${c.first_seen ? c.first_seen.slice(0,10) : '—'}</div>
+                <div class="alert-chips">
+                  <span class="alert-chip" style="background:rgba(251,146,60,.08);border-color:rgba(251,146,60,.3);color:#fb923c">Non mappée → invisible dans le P&amp;L</span>
+                </div>
+              </div>
+            </div>`).join('')}
         </div>`).join('');
     }
   }

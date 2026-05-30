@@ -341,7 +341,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
           style="display:flex;align-items:center;gap:6px;background:#1e2235;border:1px solid #2d3148;border-radius:8px;padding:6px 12px;cursor:pointer;color:#94a3b8;font-size:12px;transition:all .15s"
           onmouseover="this.style.borderColor='#6366f1';this.style.color='#e2e8f0'"
           onmouseout="this.style.borderColor='#2d3148';this.style.color='#94a3b8'">
-          ↓ Export CSV
+          ↓ Export CSV<span id="pl-export-count"></span>
         </button>
         <div class="tabs">
           <button class="tab active" id="tab-month" onclick="switchPL('month',this)">Mois</button>
@@ -771,11 +771,14 @@ function renderAll() {
   const periodLbl = state.ytd ? `YTD ${state.month.slice(0,4)}` : monthLabel(state.month);
   document.getElementById('sync-time').textContent   = `Sync OK · ${now}`;
   document.getElementById('last-sync').textContent   = `Dernière sync · ${now}`;
-  const txCnt   = d?.tx_count || 0;
-  const txSuffix = txCnt > 0 ? ` (${txCnt.toLocaleString('fr-FR')} transactions)` : '';
-  document.getElementById('pl-sub').textContent      = periodLbl + txSuffix;
+  document.getElementById('pl-sub').textContent      = periodLbl;
   document.getElementById('ratios-sub').textContent  = periodLbl;
   document.getElementById('charges-sub').textContent = periodLbl;
+
+  // Nb transactions sur le bouton Export
+  const txCnt = d?.tx_count || 0;
+  const exportCountEl = document.getElementById('pl-export-count');
+  if (exportCountEl) exportCountEl.textContent = txCnt > 0 ? ` (${txCnt.toLocaleString('fr-FR')})` : '';
 
   // Synchroniser tabs Mois/YTD avec l'état
   const tabM = document.getElementById('tab-month');

@@ -144,21 +144,19 @@ def get_kpis(month: str = Query(default=None), ytd: bool = Query(default=False))
     def pct(val):
         return round(val / ca * 100, 2) if ca else 0
 
-    # ROAS : recalculé depuis pl_daily mensuel (pub payée en lump sum, pas quotidien)
-    pl_pub = (
+    # pl_daily complet : ROAS (pub) + tx_count total — une seule requête
+    pl_all = (
         sb.table("pl_daily")
-        .select("amount")
+        .select("amount,tx_count,axe3_analytics")
         .gte("date", d_from)
         .lte("date", d_to)
-        .in_("axe3_analytics", ["Pub_Meta", "Pub_Event", "Affiliés"])
         .execute()
         .data
     )
-    total_pub = sum(abs(float(r["amount"] or 0)) for r in pl_pub)
+    PUB = {"Pub_Meta", "Pub_Event", "Affiliés"}
+    total_pub = sum(abs(float(r["amount"] or 0)) for r in pl_all if r.get("axe3_analytics") in PUB)
     roas = round(ca / total_pub, 2) if total_pub else None
-
-    # Nombre total de transactions (sommé depuis kpis_daily déjà chargé — pas de requête supplémentaire)
-    tx_total_count = int(sum(r.get("tx_count") or 0 for r in rows))
+    tx_total_count = int(sum(r.get("tx_count") or 0 for r in pl_all))
 
     data = {
         "ca_ht":             round(ca, 2),

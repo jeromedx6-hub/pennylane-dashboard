@@ -1166,16 +1166,24 @@ def export_transactions(month: str = Query(default=None),
 
 
 @app.get("/api/revenue_30d")
-def get_revenue_30d():
+def get_revenue_30d(month: str = Query(default=None)):
     """
-    KPI Revenue — 30 jours glissants :
-    CA quotidien (histogramme), remboursements, panier moyen, transactions non traitées.
+    KPI Revenue — 30 jours glissants (défaut) ou mois spécifique (month=YYYY-MM).
+    Retourne : CA quotidien (histogramme), remboursements, panier moyen, tx non traitées.
     """
-    today  = date.today()
-    d_from = (today - timedelta(days=29)).isoformat()
-    d_to   = today.isoformat()
+    today = date.today()
+    if month:
+        d_from, d_to = _month_range(month)
+        # Série : tous les jours du mois
+        y, m_int = int(month[:4]), int(month[5:7])
+        n_days   = _cal.monthrange(y, m_int)[1]
+        day_range = [date(y, m_int, d).isoformat() for d in range(1, n_days + 1)]
+    else:
+        d_from    = (today - timedelta(days=29)).isoformat()
+        d_to      = today.isoformat()
+        day_range = [(today - timedelta(days=29 - i)).isoformat() for i in range(30)]
 
-    # 1. CA quotidien depuis kpis_daily (table agrégée, rapide)
+    # 1. CA quotidien depuis kpis_daily
     daily_rows = (
         sb.table("kpis_daily")
         .select("date,ca_ht")
@@ -1188,14 +1196,12 @@ def get_revenue_30d():
     total_ca  = sum(daily_map.values())
 
     # 2. Catégories revenus
-    rev_cats = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
-    cat_set  = {r["pennylane_category_name"] for r in rev_cats}
-
-    # 3. Toutes les catégories mappées (pour "non traitées")
+    rev_cats   = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
+    cat_set    = {r["pennylane_category_name"] for r in rev_cats}
     all_mapped = sb.table("category_mapping").select("pennylane_category_name").execute().data
     mapped_set = {r["pennylane_category_name"] for r in all_mapped if r.get("pennylane_category_name")}
 
-    # 4. Transactions brutes de la période (remboursements + panier + non traitées)
+    # 3. Transactions brutes (remboursements + panier + non traitées)
     all_tx, page = [], 0
     while True:
         batch = (
@@ -1211,28 +1217,20 @@ def get_revenue_30d():
             break
         page += 1
 
-    total_refunds = 0.0
-    rev_tx_count  = 0
-    untreated     = 0
+    total_refunds, rev_tx_count, untreated = 0.0, 0, 0
     for tx in all_tx:
         amt       = float(tx.get("amount") or 0)
         cat       = tx.get("category_name") or ""
         direction = tx.get("direction") or ""
         if direction == "debit" and cat in cat_set:
-            total_refunds += amt          # débit sur catégorie revenu = remboursement
+            total_refunds += amt
         if direction == "credit" and cat in cat_set:
             rev_tx_count  += 1
         if not cat or cat not in mapped_set:
             untreated += 1
 
     panier_moyen = total_ca / rev_tx_count if rev_tx_count > 0 else 0.0
-
-    # 5. Série quotidienne complète (30 jours, zéros inclus)
-    daily_series = [
-        {"date": (today - timedelta(days=29 - i)).isoformat(),
-         "ca":   round(daily_map.get((today - timedelta(days=29 - i)).isoformat(), 0.0), 2)}
-        for i in range(30)
-    ]
+    daily_series = [{"date": d, "ca": round(daily_map.get(d, 0.0), 2)} for d in day_range]
 
     return {
         "period": {"from": d_from, "to": d_to},

@@ -1102,6 +1102,22 @@ function renderPL(plData, kpis) {
 // ── Ratios ───────────────────────────────────────────────────
 function renderRatios(d) {
   const ebitdaOk = d.ebitda_pct && d.ebitda_pct > 0;
+  const ca = d.ca_ht || 0;
+
+  const ratio = (cost) => ca > 0 ? Math.abs(cost) / ca * 100 : null;
+  const rAcq  = ratio(d.total_acquisition);
+  const rSal  = ratio(d.total_sales);
+  const rOps  = ratio(d.total_ops);
+  const rStr  = ratio(d.total_structure);
+
+  const ratioColor = (r, warn, danger) => {
+    if (r === null) return '#64748b';
+    if (r >= danger) return '#f87171';
+    if (r >= warn)   return '#fb923c';
+    return '#4ade80';
+  };
+
+  const fR = r => r !== null ? fmt(r, 1) + '%' : '—';
 
   document.getElementById('ratio-grid').innerHTML = `
     <div class="ratio-item">
@@ -1123,6 +1139,26 @@ function renderRatios(d) {
       <div class="ratio-name">MC2</div>
       <div class="ratio-val" style="color:#60a5fa">${fmtPct(d.mc2_pct)}</div>
       <div class="ratio-tags"><span class="rtag info">Après sales</span></div>
+    </div>
+    <div class="ratio-item">
+      <div class="ratio-name">Acquisition / CA HT</div>
+      <div class="ratio-val" style="color:${ratioColor(rAcq,30,50)}">${fR(rAcq)}</div>
+      <div class="ratio-tags"><span class="rtag info">${ca>0?fmtEur(Math.abs(d.total_acquisition)):'-'}</span></div>
+    </div>
+    <div class="ratio-item">
+      <div class="ratio-name">Sales & Closing / CA HT</div>
+      <div class="ratio-val" style="color:${ratioColor(rSal,15,25)}">${fR(rSal)}</div>
+      <div class="ratio-tags"><span class="rtag info">${ca>0?fmtEur(Math.abs(d.total_sales)):'-'}</span></div>
+    </div>
+    <div class="ratio-item">
+      <div class="ratio-name">Opérationnel / CA HT</div>
+      <div class="ratio-val" style="color:${ratioColor(rOps,25,40)}">${fR(rOps)}</div>
+      <div class="ratio-tags"><span class="rtag info">${ca>0?fmtEur(Math.abs(d.total_ops)):'-'}</span></div>
+    </div>
+    <div class="ratio-item">
+      <div class="ratio-name">Structure / CA HT</div>
+      <div class="ratio-val" style="color:${ratioColor(rStr,20,35)}">${fR(rStr)}</div>
+      <div class="ratio-tags"><span class="rtag info">${ca>0?fmtEur(Math.abs(d.total_structure)):'-'}</span></div>
     </div>`;
 }
 

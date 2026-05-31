@@ -238,7 +238,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="logo"><div class="logo-icon">📊</div> FinBoard</div>
   <div class="nav-label">Analyse</div>
   <div class="nav-item active" onclick="showPage('indicateurs', this)">⬡ &nbsp;Indicateurs</div>
-  <div class="nav-item" onclick="showPage('kpi', this)">◈ &nbsp;KPI Clients</div>
+  <div class="nav-item" onclick="showPage('kpi', this)">◈ &nbsp;KPI Revenue</div>
   <div class="nav-label">Supervision</div>
   <div class="nav-item" onclick="showPage('alertes', this)" id="nav-alertes" style="justify-content:space-between">
     <span>⚠ &nbsp;Alertes</span>
@@ -378,51 +378,38 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 
 </div><!-- /page-indicateurs -->
 
-<!-- ════ PAGE : KPI CLIENTS ════════════════════════════════ -->
+<!-- ════ PAGE : KPI REVENUE ════════════════════════════════ -->
 <div id="page-kpi" class="page" style="display:none">
 
-  <!-- Header -->
   <div class="page-header">
     <div>
-      <div class="page-title">KPI <span>Clients</span></div>
-      <div class="header-sub">Nouveaux vs récurrents · Source Pennylane</div>
+      <div class="page-title">KPI <span>Revenue</span></div>
+      <div class="header-sub" id="rev30-period-sub">30 jours glissants · Source Pennylane</div>
     </div>
-    <div class="header-right" style="flex-wrap:wrap;gap:8px">
-      <div class="date-selector" id="kpi-period-btns">
-        <button class="date-btn active" onclick="setKpiPeriod('day',this)">Jour</button>
-        <button class="date-btn" onclick="setKpiPeriod('week',this)">Semaine</button>
-        <button class="date-btn" onclick="setKpiPeriod('month',this)">Mois</button>
-        <button class="date-btn" onclick="setKpiPeriod('custom',this)">Personnalisé</button>
-      </div>
-      <div id="kpi-custom-range" style="display:none;align-items:center;gap:6px">
-        <input type="date" id="kpi-date-from" onchange="fetchKpiData()"
-          style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:6px 10px;color:#e2e8f0;font-size:12px">
-        <span style="color:#475569;font-size:12px">→</span>
-        <input type="date" id="kpi-date-to" onchange="fetchKpiData()"
-          style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:6px 10px;color:#e2e8f0;font-size:12px">
-      </div>
-      <div class="sync-badge"><span id="kpi-period-label">Ce mois</span></div>
-      <button class="sync-btn" id="sync-btn-kpi" onclick="openSyncModal()">⟳ Recalculer</button>
+    <div class="header-right">
+      <button class="sync-btn" onclick="openSyncModal()">⟳ Recalculer</button>
     </div>
   </div>
 
-  <!-- KPI Cards -->
-  <div class="kpi-grid" id="kpi-clients-grid">
-    <div class="kpi-card green"><div class="kpi-label">Nouveaux Clients</div><div class="kpi-value skeleton" style="height:32px;width:60px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card blue"><div class="kpi-label">CA Nouveaux Clients</div><div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card purple"><div class="kpi-label">CA Clients Récurrents</div><div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card orange"><div class="kpi-label">CA Total Période</div><div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+  <!-- 4 KPI Cards -->
+  <div class="kpi-grid" id="rev30-grid">
+    <div class="kpi-card green"><div class="kpi-value skeleton" style="height:32px;width:140px;margin:14px 0 8px"></div></div>
+    <div class="kpi-card red"><div class="kpi-value skeleton" style="height:32px;width:120px;margin:14px 0 8px"></div></div>
+    <div class="kpi-card blue"><div class="kpi-value skeleton" style="height:32px;width:120px;margin:14px 0 8px"></div></div>
+    <div class="kpi-card orange"><div class="kpi-value skeleton" style="height:32px;width:80px;margin:14px 0 8px"></div></div>
   </div>
 
-  <!-- Répartition -->
+  <!-- Histogramme CA quotidien -->
   <div class="card">
     <div class="card-header">
       <div>
-        <div class="card-title">Répartition CA — Nouveaux vs Récurrents</div>
-        <div class="card-sub" id="kpi-split-label">Chargement…</div>
+        <div class="card-title">CA encaissé · Jour par jour</div>
+        <div class="card-sub" id="rev30-chart-sub">—</div>
       </div>
     </div>
-    <div id="kpi-split-bar"><div style="color:#475569;text-align:center;padding:30px">Chargement…</div></div>
+    <div style="position:relative;height:300px;padding-bottom:8px">
+      <canvas id="chart-rev30"></canvas>
+    </div>
   </div>
 
 </div><!-- /page-kpi -->
@@ -1609,7 +1596,7 @@ function showPage(page, el) {
   document.getElementById('page-' + page).style.display = '';
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
-  if (page === 'kpi'     && !kpiState.date_from) initKpiPage();
+  if (page === 'kpi') fetchRev30();
   if (page === 'alertes') loadAlerts();
   if (page === 'mapping') loadMappingStatus();
   if (page === 'release') loadReleaseNotes();
@@ -1913,134 +1900,125 @@ function renderReleaseNotes(notes) {
     </div>`).join('')}</div>`;
 }
 
-// ── KPI Clients ───────────────────────────────────────────────
-let kpiPeriodMode = 'month';
-let kpiState = { date_from: null, date_to: null, data: null };
+// ── KPI Revenue 30j ───────────────────────────────────────────
+let rev30Data   = null;
+let chartRev30  = null;
 
-function initKpiPage() {
-  const btn = document.querySelector('#kpi-period-btns .date-btn');
-  setKpiPeriod('month', btn);
-}
-
-function setKpiPeriod(mode, btn) {
-  kpiPeriodMode = mode;
-  document.querySelectorAll('#kpi-period-btns .date-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-
-  const cr = document.getElementById('kpi-custom-range');
-  if (mode === 'custom') { cr.style.display = 'flex'; return; }
-  cr.style.display = 'none';
-
-  const today = new Date();
-  const f     = d => d.toISOString().slice(0, 10);
-  let dFrom, dTo = f(today), lbl;
-
-  if (mode === 'day') {
-    dFrom = f(today);
-    lbl   = "Aujourd'hui — " + today.toLocaleDateString('fr-FR', {day:'numeric',month:'long'});
-  } else if (mode === 'week') {
-    const d = new Date(today);
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // lundi
-    dFrom = f(d);
-    lbl   = 'Semaine du ' + d.toLocaleDateString('fr-FR', {day:'numeric',month:'short'});
-  } else {
-    dFrom = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
-    lbl   = new Date(today.getFullYear(), today.getMonth(), 1)
-              .toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
-    lbl   = lbl.charAt(0).toUpperCase() + lbl.slice(1);
-  }
-
-  document.getElementById('kpi-period-label').textContent = lbl;
-  document.getElementById('kpi-split-label').textContent  = lbl;
-  kpiState.date_from = dFrom;
-  kpiState.date_to   = dTo;
-  fetchKpiData();
-}
-
-async function fetchKpiData() {
-  if (kpiPeriodMode === 'custom') {
-    const from = document.getElementById('kpi-date-from').value;
-    const to   = document.getElementById('kpi-date-to').value;
-    if (!from || !to) return;
-    kpiState.date_from = from;
-    kpiState.date_to   = to;
-    const lbl = `${from} → ${to}`;
-    document.getElementById('kpi-period-label').textContent = lbl;
-    document.getElementById('kpi-split-label').textContent  = lbl;
-  }
-  if (!kpiState.date_from || !kpiState.date_to) return;
-
-  const grid = document.getElementById('kpi-clients-grid');
-  grid.innerHTML = ['green','blue','purple','red'].map(c =>
-    `<div class="kpi-card ${c}"><div class="kpi-value skeleton" style="height:32px;width:80px;margin:12px 0 8px"></div></div>`
-  ).join('');
-
+async function fetchRev30() {
   try {
-    const res  = await fetch(`${API}/api/kpi_clients?date_from=${kpiState.date_from}&date_to=${kpiState.date_to}`);
+    const res  = await fetch(`${API}/api/revenue_30d`);
     const json = await res.json();
-    kpiState.data = json.data;
-    renderKpiPage();
+    rev30Data  = json;
+    renderRev30();
   } catch(e) {
-    console.error('KPI clients error', e);
-    grid.innerHTML = `<div style="color:#f87171;padding:20px;grid-column:1/-1">Erreur de chargement</div>`;
+    console.error('revenue_30d error', e);
   }
 }
 
-function renderKpiPage() {
-  const d    = kpiState.data;
-  const grid = document.getElementById('kpi-clients-grid');
-  const bar  = document.getElementById('kpi-split-bar');
+function renderRev30() {
+  const data = rev30Data;
+  if (!data) return;
 
-  if (!d) {
-    grid.innerHTML = `<div style="color:#475569;padding:40px;text-align:center;grid-column:1/-1;font-size:13px">Aucune donnée pour cette période.</div>`;
-    if (bar) bar.innerHTML = '';
-    return;
-  }
+  const k    = data.kpis;
+  const grid = document.getElementById('rev30-grid');
 
-  const hasImpayes = d.impayes.count > 0;
+  // Labels de période
+  const fmtD = iso => {
+    const [,m,dd] = iso.split('-');
+    const mo = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'][+m-1];
+    return `${+dd} ${mo}`;
+  };
+  const periodTxt = `${fmtD(data.period.from)} → ${fmtD(data.period.to)}`;
+  const sub = document.getElementById('rev30-period-sub');
+  const csub = document.getElementById('rev30-chart-sub');
+  if (sub)  sub.textContent  = `${periodTxt} · Source Pennylane`;
+  if (csub) csub.textContent = periodTxt;
 
-  // ── 4 KPI Cards ──────────────────────────────────────────────
+  // 4 KPI Cards
   grid.innerHTML = `
     <div class="kpi-card green">
-      <div class="kpi-label">Nouveaux Clients</div>
-      <div class="kpi-value">${d.new_clients.count}<sup style="font-size:14px;color:#94a3b8;font-weight:400"> cl.</sup></div>
-      <div class="kpi-deltas"><span style="font-size:12px;color:#4ade80;font-weight:600">${fmtEur(d.new_clients.ca)}</span></div>
+      <div class="kpi-label">CA Encaissé</div>
+      <div class="kpi-value" style="font-size:22px">${fmtEur(k.ca_total)}</div>
+      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">30 jours glissants</span></div>
+    </div>
+    <div class="kpi-card red">
+      <div class="kpi-label">Remboursements</div>
+      <div class="kpi-value" style="font-size:22px;color:${k.remboursements>0?'#f87171':'#e2e8f0'}">
+        ${k.remboursements>0?'- ':''}${fmtEur(k.remboursements)}
+      </div>
+      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">débits catégories revenus</span></div>
     </div>
     <div class="kpi-card blue">
-      <div class="kpi-label">Clients Récurrents</div>
-      <div class="kpi-value">${d.recurring.count}<sup style="font-size:14px;color:#94a3b8;font-weight:400"> cl.</sup></div>
-      <div class="kpi-deltas"><span style="font-size:12px;color:#60a5fa;font-weight:600">${fmtEur(d.recurring.ca)}</span></div>
+      <div class="kpi-label">Panier Moyen</div>
+      <div class="kpi-value" style="font-size:22px">${fmtEur(k.panier_moyen)}</div>
+      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">par transaction revenu</span></div>
     </div>
-    <div class="kpi-card purple">
-      <div class="kpi-label">Nouveau Produit</div>
-      <div class="kpi-value">${d.new_product.count}<sup style="font-size:14px;color:#94a3b8;font-weight:400"> cl.</sup></div>
-      <div class="kpi-deltas"><span style="font-size:12px;color:#a78bfa;font-weight:600">${fmtEur(d.new_product.ca)}</span></div>
-    </div>
-    <div class="kpi-card ${hasImpayes?'red':'green'}" style="cursor:pointer" onclick="openImpayes()">
-      <div class="kpi-hint">↗ détail</div>
-      <div class="kpi-label">Impayés ${hasImpayes?'⚠️':''}</div>
-      <div class="kpi-value" style="color:${hasImpayes?'#f87171':'#4ade80'}">${d.impayes.count}</div>
-      <div class="kpi-deltas">${hasImpayes?'<span style="font-size:11px;color:#f87171">Cliquer pour voir le détail</span>':'<span style="font-size:11px;color:#4ade80">✓ Aucun impayé</span>'}</div>
+    <div class="kpi-card orange">
+      <div class="kpi-label">Transactions Non Traitées</div>
+      <div class="kpi-value" style="font-size:28px;color:${k.tx_non_traitees>0?'#fb923c':'#4ade80'}">
+        ${k.tx_non_traitees.toLocaleString('fr-FR')}
+      </div>
+      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">sans mapping P&L</span></div>
     </div>`;
 
-  // ── Barre répartition 3 segments ─────────────────────────────
-  const total = d.new_clients.ca + d.recurring.ca + d.new_product.ca;
-  const p     = v => total ? Math.round(v / total * 100) : 0;
-  if (bar) bar.innerHTML = `
-    <div class="prog-wrap" style="margin-bottom:20px">
-      <div class="prog-header" style="margin-bottom:8px;font-size:11px">
-        <span style="display:flex;gap:16px;flex-wrap:wrap">
-          <span style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;background:#4ade80;border-radius:2px;display:inline-block"></span>Nouveaux ${fmtEur(d.new_clients.ca)} · ${p(d.new_clients.ca)}%</span>
-          <span style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;background:#60a5fa;border-radius:2px;display:inline-block"></span>Récurrents ${fmtEur(d.recurring.ca)} · ${p(d.recurring.ca)}%</span>
-          <span style="display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;background:#a78bfa;border-radius:2px;display:inline-block"></span>Nvx produit ${fmtEur(d.new_product.ca)} · ${p(d.new_product.ca)}%</span>
-        </span>
-      </div>
-      <div style="height:22px;background:#252840;border-radius:11px;overflow:hidden;display:flex">
-        <div style="width:${p(d.new_clients.ca)}%;background:linear-gradient(90deg,#4ade80,#22c55e);transition:width .6s"></div>
-        <div style="width:${p(d.recurring.ca)}%;background:linear-gradient(90deg,#60a5fa,#3b82f6);transition:width .6s"></div>
-        <div style="width:${p(d.new_product.ca)}%;background:linear-gradient(90deg,#a78bfa,#8b5cf6);transition:width .6s"></div>
-      </div>
-    </div>`;
+  // Histogramme
+  const labels = data.daily.map(d => {
+    const [,m,dd] = d.date.split('-');
+    return `${+dd}/${m}`;
+  });
+  const values = data.daily.map(d => d.ca);
+  const colors = values.map(v => v > 0 ? 'rgba(99,102,241,0.75)' : 'rgba(248,113,113,0.5)');
+  const borders = values.map(v => v > 0 ? '#6366f1' : '#f87171');
+
+  const ctx = document.getElementById('chart-rev30')?.getContext('2d');
+  if (!ctx) return;
+  if (chartRev30) chartRev30.destroy();
+  chartRev30 = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'CA encaissé',
+        data: values,
+        backgroundColor: colors,
+        borderColor: borders,
+        borderWidth: 1,
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        datalabels: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => {
+              const d = data.daily[items[0].dataIndex];
+              return new Date(d.date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
+            },
+            label: item => `CA : ${fmtEur(item.raw)}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(45,49,72,0.5)' },
+          ticks: { color: '#64748b', font: { size: 10 }, maxRotation: 45 },
+        },
+        y: {
+          grid: { color: 'rgba(45,49,72,0.5)' },
+          ticks: {
+            color: '#64748b',
+            font: { size: 11 },
+            callback: v => v >= 1000 ? `${(v/1000).toFixed(0)}k€` : `${v}€`
+          },
+          beginAtZero: true,
+        }
+      }
+    }
+  });
 }
 
 // ── Modal Impayés ─────────────────────────────────────────────
@@ -2189,7 +2167,7 @@ async function launchSync() {
           // Refresh la page active
           const pg = document.querySelector('.page[style*="display: block"], .page:not([style*="none"])');
           if (document.getElementById('page-indicateurs').style.display !== 'none') fetchAll();
-          else if (document.getElementById('page-kpi').style.display     !== 'none') fetchKpiData();
+          else if (document.getElementById('page-kpi').style.display     !== 'none') fetchRev30();
         }
       }
     } catch(e) { /* ignore erreurs réseau transitoires */ }

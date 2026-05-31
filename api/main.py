@@ -1165,6 +1165,87 @@ def export_transactions(month: str = Query(default=None),
     )
 
 
+@app.get("/api/revenue_30d")
+def get_revenue_30d():
+    """
+    KPI Revenue — 30 jours glissants :
+    CA quotidien (histogramme), remboursements, panier moyen, transactions non traitées.
+    """
+    today  = date.today()
+    d_from = (today - timedelta(days=29)).isoformat()
+    d_to   = today.isoformat()
+
+    # 1. CA quotidien depuis kpis_daily (table agrégée, rapide)
+    daily_rows = (
+        sb.table("kpis_daily")
+        .select("date,ca_ht")
+        .gte("date", d_from)
+        .lte("date", d_to)
+        .order("date")
+        .execute().data
+    )
+    daily_map = {r["date"]: float(r["ca_ht"] or 0) for r in daily_rows}
+    total_ca  = sum(daily_map.values())
+
+    # 2. Catégories revenus
+    rev_cats = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
+    cat_set  = {r["pennylane_category_name"] for r in rev_cats}
+
+    # 3. Toutes les catégories mappées (pour "non traitées")
+    all_mapped = sb.table("category_mapping").select("pennylane_category_name").execute().data
+    mapped_set = {r["pennylane_category_name"] for r in all_mapped if r.get("pennylane_category_name")}
+
+    # 4. Transactions brutes de la période (remboursements + panier + non traitées)
+    all_tx, page = [], 0
+    while True:
+        batch = (
+            sb.table("transactions")
+            .select("amount,direction,category_name")
+            .gte("date", d_from)
+            .lte("date", d_to)
+            .range(page * 1000, (page + 1) * 1000 - 1)
+            .execute().data
+        )
+        all_tx.extend(batch)
+        if len(batch) < 1000:
+            break
+        page += 1
+
+    total_refunds = 0.0
+    rev_tx_count  = 0
+    untreated     = 0
+    for tx in all_tx:
+        amt       = float(tx.get("amount") or 0)
+        cat       = tx.get("category_name") or ""
+        direction = tx.get("direction") or ""
+        if direction == "debit" and cat in cat_set:
+            total_refunds += amt          # débit sur catégorie revenu = remboursement
+        if direction == "credit" and cat in cat_set:
+            rev_tx_count  += 1
+        if not cat or cat not in mapped_set:
+            untreated += 1
+
+    panier_moyen = total_ca / rev_tx_count if rev_tx_count > 0 else 0.0
+
+    # 5. Série quotidienne complète (30 jours, zéros inclus)
+    daily_series = [
+        {"date": (today - timedelta(days=29 - i)).isoformat(),
+         "ca":   round(daily_map.get((today - timedelta(days=29 - i)).isoformat(), 0.0), 2)}
+        for i in range(30)
+    ]
+
+    return {
+        "period": {"from": d_from, "to": d_to},
+        "kpis": {
+            "ca_total":        round(total_ca, 2),
+            "remboursements":  round(total_refunds, 2),
+            "panier_moyen":    round(panier_moyen, 2),
+            "tx_non_traitees": untreated,
+        },
+        "daily": daily_series,
+    }
+
+
 @app.get("/api/release_notes")
 def get_release_notes(limit: int = Query(default=50, le=100)):
     """Historique des mises à jour du superviseur (changelog automatique)."""

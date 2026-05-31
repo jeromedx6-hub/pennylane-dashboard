@@ -9,9 +9,10 @@ import calendar as _cal
 from collections import defaultdict
 from datetime import date, timedelta, datetime as _dt
 from fastapi import FastAPI, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from supabase import create_client
 
 # Rend sync.py importable depuis l'API
@@ -1277,7 +1278,27 @@ def get_sync_audit(limit: int = Query(default=10, le=50)):
         return {"data": [], "error": str(e)}
 
 
-# Sert le frontend HTML en production
+# ── Middleware no-cache sur l'HTML (force le navigateur à recharger à chaque deploy) ──
+class NoCacheHTMLMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        ct = response.headers.get("content-type", "")
+        if "text/html" in ct:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"]        = "no-cache"
+            response.headers["Expires"]       = "0"
+        return response
+
+app.add_middleware(NoCacheHTMLMiddleware)
+
+# Route explicite pour / → index.html avec no-cache garanti
 _frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.exists(_frontend_dir):
+    @app.get("/", include_in_schema=False)
+    async def _root():
+        return FileResponse(
+            os.path.join(_frontend_dir, "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate",
+                     "Pragma": "no-cache", "Expires": "0"}
+        )
     app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")

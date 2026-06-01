@@ -239,6 +239,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="nav-label">Analyse</div>
   <div class="nav-item active" onclick="showPage('indicateurs', this)">⬡ &nbsp;Indicateurs</div>
   <div class="nav-item" onclick="showPage('kpi', this)">◈ &nbsp;KPI Revenue</div>
+  <div class="nav-item" onclick="showPage('crm', this)">◈ &nbsp;CRM Systeme.io</div>
   <div class="nav-label">Supervision</div>
   <div class="nav-item" onclick="showPage('alertes', this)" id="nav-alertes" style="justify-content:space-between">
     <span>⚠ &nbsp;Alertes</span>
@@ -558,6 +559,45 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   </div>
 
 </div><!-- /page-release -->
+
+<!-- ═══════════════════════ PAGE CRM SYSTEME.IO ═══════════════════════════ -->
+<div id="page-crm" class="page" style="display:none">
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">◈ &nbsp;CRM <span>Systeme.io</span></div>
+      <div class="header-sub" id="crm-sync-time">Chargement des données…</div>
+    </div>
+    <div class="header-right">
+      <button class="sync-btn" id="crm-refresh-btn" onclick="fetchCRM(true)">⟳ &nbsp;Actualiser</button>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid" id="crm-kpi-grid" style="margin-bottom:20px">
+    <div class="kpi-card blue"><div class="kpi-label">Nouveaux contacts (mois)</div><div class="kpi-value">—</div><div class="kpi-deltas">En cours de chargement</div></div>
+    <div class="kpi-card purple"><div class="kpi-label">Mois précédent</div><div class="kpi-value">—</div><div class="kpi-deltas">—</div></div>
+    <div class="kpi-card green"><div class="kpi-label">Évolution</div><div class="kpi-value">—</div><div class="kpi-deltas">vs mois précédent</div></div>
+    <div class="kpi-card orange"><div class="kpi-label">Inscrits actifs</div><div class="kpi-value">—</div><div class="kpi-deltas">formations clés</div></div>
+  </div>
+
+  <!-- Histogramme 6 mois -->
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-title">📈 &nbsp;Nouveaux contacts — 6 derniers mois</div>
+    <div style="height:220px;position:relative;padding-top:12px">
+      <canvas id="chart-crm-history"></canvas>
+    </div>
+  </div>
+
+  <!-- Tableau formations -->
+  <div class="card">
+    <div class="card-title">🎓 &nbsp;Inscriptions par formation clé</div>
+    <div id="crm-enrollments-table" style="margin-top:12px">
+      <div style="color:#475569;text-align:center;padding:30px">Chargement…</div>
+    </div>
+  </div>
+
+</div><!-- /page-crm -->
 
 </div><!-- /main -->
 
@@ -1814,7 +1854,8 @@ function showPage(page, el) {
   document.getElementById('page-' + page).style.display = '';
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
-  if (page === 'kpi') fetchRev30();
+  if (page === 'kpi')    fetchRev30();
+  if (page === 'crm')    fetchCRM();
   if (page === 'alertes') loadAlerts();
   if (page === 'mapping') loadMappingStatus();
   if (page === 'release') loadReleaseNotes();
@@ -2268,6 +2309,153 @@ function renderRev30() {
           },
           beginAtZero: true,
         }
+      }
+    }
+  });
+}
+
+// ── CRM Systeme.io ────────────────────────────────────────────
+let crmData = null;
+let chartCRMHistory = null;
+
+async function fetchCRM(forceRefresh = false) {
+  const url = `${API}/api/systeme${forceRefresh ? '?refresh=true' : ''}`;
+  const btn = document.getElementById('crm-refresh-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⟳ Chargement…'; }
+
+  try {
+    const res  = await fetch(url);
+    const json = await res.json();
+    if (json.error) { showToast('Erreur CRM : ' + json.error, 'error'); return; }
+    crmData = json;
+    renderCRM(json);
+  } catch(e) {
+    showToast('Erreur chargement CRM', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⟳ Actualiser'; }
+  }
+}
+
+function renderCRM(json) {
+  const d = json?.data;
+  if (!d) return;
+
+  // Sous-titre
+  const syncEl = document.getElementById('crm-sync-time');
+  if (syncEl) {
+    const t = new Date(d.refreshed_at);
+    syncEl.textContent = `Mis à jour ${t.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})} · Mois : ${d.month} · Préc. : ${d.prev_month}`;
+  }
+
+  // ── KPI cards ──
+  const grid = document.getElementById('crm-kpi-grid');
+  if (grid) {
+    const gp  = d.growth_pct;
+    const gCol = gp === null ? '#94a3b8' : gp >= 0 ? '#4ade80' : '#f87171';
+    const gCls = gp === null ? 'green' : gp >= 0 ? 'green' : 'red';
+    const gTxt = gp !== null ? (gp > 0 ? '+' : '') + fmt(gp, 1) + '%' : '—';
+    grid.innerHTML = `
+      <div class="kpi-card blue">
+        <div class="kpi-label">Nouveaux contacts (mois)</div>
+        <div class="kpi-value">${d.new_contacts_mtd.toLocaleString('fr-FR')}</div>
+        <div class="kpi-deltas">${d.month}</div>
+      </div>
+      <div class="kpi-card purple">
+        <div class="kpi-label">Mois précédent</div>
+        <div class="kpi-value">${d.new_contacts_prev.toLocaleString('fr-FR')}</div>
+        <div class="kpi-deltas">${d.prev_month}</div>
+      </div>
+      <div class="kpi-card ${gCls}">
+        <div class="kpi-label">Évolution</div>
+        <div class="kpi-value" style="color:${gCol}">${gTxt}</div>
+        <div class="kpi-deltas">vs mois précédent</div>
+      </div>
+      <div class="kpi-card orange">
+        <div class="kpi-label">Inscrits actifs</div>
+        <div class="kpi-value">${d.total_active_enrollments.toLocaleString('fr-FR')}</div>
+        <div class="kpi-deltas">formations clés</div>
+      </div>`;
+  }
+
+  // ── Histogramme ──
+  renderCRMHistory(json.history);
+
+  // ── Tableau formations ──
+  const tableEl = document.getElementById('crm-enrollments-table');
+  if (tableEl && d.enrollments?.length) {
+    const sorted = [...d.enrollments].sort((a, b) => b.active - a.active);
+    const rows = sorted.map(e => `
+      <tr style="border-bottom:1px solid #1e2235">
+        <td style="padding:11px 14px;color:#e2e8f0;font-weight:500">${e.name}</td>
+        <td style="padding:11px 14px;text-align:right;color:#4ade80;font-size:15px;font-weight:700">${e.active.toLocaleString('fr-FR')}</td>
+        <td style="padding:11px 14px;text-align:right;color:#64748b">${e.total.toLocaleString('fr-FR')}</td>
+        <td style="padding:11px 14px;min-width:140px">
+          <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">
+            <div style="flex:1;max-width:80px;height:6px;background:#1e2235;border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:${Math.min(e.pct_active,100)}%;background:#4ade80;border-radius:3px;transition:width .6s"></div>
+            </div>
+            <span style="color:#94a3b8;font-size:11px;min-width:32px;text-align:right">${e.pct_active}%</span>
+          </div>
+        </td>
+      </tr>`).join('');
+
+    tableEl.innerHTML = `
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:1px solid #2d3148">
+            <th style="padding:8px 14px;text-align:left;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Formation</th>
+            <th style="padding:8px 14px;text-align:right;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Actifs</th>
+            <th style="padding:8px 14px;text-align:right;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Total</th>
+            <th style="padding:8px 14px;text-align:right;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Taux actif</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+}
+
+function renderCRMHistory(history) {
+  if (!history?.length) return;
+  if (chartCRMHistory) { chartCRMHistory.destroy(); chartCRMHistory = null; }
+  const ctx = document.getElementById('chart-crm-history')?.getContext('2d');
+  if (!ctx) return;
+
+  const labels = history.map(h => {
+    const [y, m] = h.month.split('-');
+    return new Date(+y, +m - 1, 1).toLocaleDateString('fr-FR', {month:'short', year:'2-digit'});
+  });
+  const values  = history.map(h => h.new_contacts);
+  const maxVal  = Math.max(...values) || 1;
+  const bgColors = values.map(v => v === maxVal ? 'rgba(99,102,241,.85)' : 'rgba(99,102,241,.35)');
+
+  chartCRMHistory = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Nouveaux contacts',
+        data: values,
+        backgroundColor: bgColors,
+        borderColor: '#6366f1',
+        borderWidth: 1,
+        borderRadius: 6,
+      }]
+    },
+    plugins: [ChartDataLabels],
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          color: '#94a3b8', font: { size: 11 },
+          anchor: 'end', align: 'top',
+          formatter: v => v > 0 ? v.toLocaleString('fr-FR') : '',
+        }
+      },
+      scales: {
+        x: { grid: { color: '#1e2235' }, ticks: { color: '#475569', font: { size: 11 } } },
+        y: { grid: { color: '#1e2235' }, ticks: { color: '#94a3b8', font: { size: 10 } }, beginAtZero: true }
       }
     }
   });

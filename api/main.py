@@ -1278,6 +1278,193 @@ def get_sync_audit(limit: int = Query(default=10, le=50)):
         return {"data": [], "error": str(e)}
 
 
+# ── Systeme.io CRM ─────────────────────────────────────────────────────────────────────
+import urllib.request as _urllib_req
+
+SYSTEME_KEY  = os.getenv("SYSTEME_API_KEY", "")
+SYSTEME_BASE = "https://api.systeme.io/api"
+
+# Formations clés à suivre {id: label_court}
+_SYSTEME_COURSES = {
+    63490:  "Alchimiste",
+    88824:  "Apprenti Alchimiste",
+    200772: "Cure Régénérative",
+    218921: "Académie",
+    106880: "Tronc commun (DBS)",
+}
+
+_systeme_cache = {"data": None, "history": None, "refreshed_at": None, "hist_at": None}
+_systeme_lock  = threading.Lock()
+
+
+def _sys_fetch(path: str):
+    req = _urllib_req.Request(
+        f"{SYSTEME_BASE}{path}",
+        headers={"X-API-Key": SYSTEME_KEY, "Accept": "application/json"}
+    )
+    with _urllib_req.urlopen(req, timeout=20) as r:
+        return json.loads(r.read())
+
+
+def _sys_count_contacts(after_iso: str, before_iso: str = None, max_pages: int = 40) -> int:
+    url = f"/contacts?limit=100&registeredAfter={after_iso}"
+    if before_iso:
+        url += f"&registeredBefore={before_iso}"
+    total, page = 0, 1
+    while page <= max_pages:
+        d     = _sys_fetch(f"{url}&page={page}")
+        items = d.get("items", [])
+        total += len(items)
+        if not d.get("hasMore") or len(items) < 100:
+            break
+        page += 1
+    return total
+
+
+def _sys_refresh_main() -> dict:
+    import json as _json
+    today          = date.today()
+    first_mtd      = date(today.year, today.month, 1)
+    prev_last      = first_mtd - timedelta(days=1)
+    first_prev     = date(prev_last.year, prev_last.month, 1)
+
+    after_mtd  = f"{first_mtd.isoformat()}T00:00:00+00:00"
+    after_prev = f"{first_prev.isoformat()}T00:00:00+00:00"
+    before_prev= f"{prev_last.isoformat()}T23:59:59+00:00"
+
+    # Comptes contacts via threads parallèles
+    results = {}
+    def _cnt(key, after, before=None):
+        try:
+            results[key] = _sys_count_contacts(after, before)
+        except Exception as e:
+            results[key] = 0
+            logging.warning(f"systeme count {key}: {e}")
+
+    t1 = threading.Thread(target=_cnt, args=("mtd",  after_mtd))
+    t2 = threading.Thread(target=_cnt, args=("prev", after_prev, before_prev))
+    t1.start(); t2.start(); t1.join(); t2.join()
+
+    mtd  = results.get("mtd",  0)
+    prev = results.get("prev", 0)
+    growth = round((mtd - prev) / prev * 100, 1) if prev else None
+
+    # Enrollments formations clés
+    enrollments = {cid: {"name": n, "active": 0, "total": 0}
+                   for cid, n in _SYSTEME_COURSES.items()}
+    page, has_more = 1, True
+    while has_more and page <= 70:
+        d = _sys_fetch(f"/school/enrollments?limit=100&page={page}")
+        for e in d.get("items", []):
+            cid = e.get("course", {}).get("id")
+            if cid in enrollments:
+                enrollments[cid]["total"] += 1
+                if e.get("active"):
+                    enrollments[cid]["active"] += 1
+        has_more = d.get("hasMore", False)
+        page += 1
+
+    total_active = sum(v["active"] for v in enrollments.values())
+
+    return {
+        "new_contacts_mtd":  mtd,
+        "new_contacts_prev": prev,
+        "growth_pct":        growth,
+        "total_active_enrollments": total_active,
+        "month":             today.strftime("%Y-%m"),
+        "prev_month":        prev_last.strftime("%Y-%m"),
+        "enrollments": [
+            {"id": cid, "name": v["name"], "active": v["active"], "total": v["total"],
+             "pct_active": round(v["active"]/v["total"]*100,1) if v["total"] else 0}
+            for cid, v in enrollments.items() if v["total"] > 0
+        ],
+        "refreshed_at": _dt.utcnow().isoformat() + "Z",
+    }
+
+
+def _sys_refresh_history() -> list:
+    """Retourne les 6 derniers mois : nouveaux contacts par mois."""
+    today  = date.today()
+    months = []
+    results = {}
+
+    def _cnt_month(ym: str):
+        y, m = int(ym[:4]), int(ym[5:7])
+        first = date(y, m, 1)
+        last  = date(y, m+1, 1) - timedelta(days=1) if m < 12 else date(y, 12, 31)
+        after  = f"{first.isoformat()}T00:00:00+00:00"
+        before = f"{last.isoformat()}T23:59:59+00:00"
+        try:
+            results[ym] = _sys_count_contacts(after, before)
+        except Exception:
+            results[ym] = 0
+
+    threads = []
+    for i in range(5, -1, -1):
+        d    = _add_months(date(today.year, today.month, 1), -i)
+        ym   = d.strftime("%Y-%m")
+        months.append(ym)
+        t = threading.Thread(target=_cnt_month, args=(ym,))
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
+
+    return [{"month": m, "new_contacts": results.get(m, 0)} for m in months]
+
+
+@app.get("/api/systeme")
+def get_systeme(refresh: bool = Query(default=False)):
+    """Métriques CRM systeme.io (cache 30 min)."""
+    if not SYSTEME_KEY:
+        return {"error": "SYSTEME_API_KEY non configuré", "data": None}
+
+    with _systeme_lock:
+        cached   = _systeme_cache["data"]
+        ref_at   = _systeme_cache["refreshed_at"]
+        hist     = _systeme_cache["history"]
+        hist_at  = _systeme_cache["hist_at"]
+        now = _dt.utcnow()
+        main_stale = not ref_at  or (now - _dt.fromisoformat(ref_at.rstrip("Z"))).seconds > 1800
+        hist_stale = not hist_at or (now - _dt.fromisoformat(hist_at.rstrip("Z"))).seconds > 21600
+
+    # Premier appel ou refresh forcé → synchrone
+    if refresh or (cached is None):
+        try:
+            data = _sys_refresh_main()
+            history = _sys_refresh_history()
+        except Exception as e:
+            return {"error": str(e), "data": None}
+        with _systeme_lock:
+            _systeme_cache["data"]       = data
+            _systeme_cache["history"]    = history
+            _systeme_cache["refreshed_at"] = data["refreshed_at"]
+            _systeme_cache["hist_at"]      = data["refreshed_at"]
+        return {"data": data, "history": history}
+
+    # Refresh en arrière-plan si périmé
+    if main_stale or hist_stale:
+        def _bg():
+            try:
+                if main_stale:
+                    d = _sys_refresh_main()
+                    with _systeme_lock:
+                        _systeme_cache["data"] = d
+                        _systeme_cache["refreshed_at"] = d["refreshed_at"]
+                if hist_stale:
+                    h = _sys_refresh_history()
+                    with _systeme_lock:
+                        _systeme_cache["history"] = h
+                        _systeme_cache["hist_at"] = _dt.utcnow().isoformat() + "Z"
+            except Exception as e:
+                logging.warning(f"systeme bg refresh: {e}")
+        threading.Thread(target=_bg, daemon=True).start()
+
+    with _systeme_lock:
+        return {"data": _systeme_cache["data"], "history": _systeme_cache["history"]}
+
+
 # ── Middleware no-cache sur l'HTML (force le navigateur à recharger à chaque deploy) ──
 class NoCacheHTMLMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):

@@ -1,4 +1,6 @@
 import csv
+import hashlib
+import hmac
 import io
 import json
 import logging
@@ -9,7 +11,7 @@ import threading
 import calendar as _cal
 from collections import defaultdict
 from datetime import date, timedelta, datetime as _dt
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request, Header
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -1680,6 +1682,166 @@ def get_new_clients(month: str = Query(default=None)):
     with _new_clients_lock:
         _new_clients_cache[month] = {"data": result, "cached_at": _dt.utcnow().isoformat()}
     return result
+
+
+# ── Webhook systeme.io → Supabase sales_events ────────────────────────────────────────
+SYSTEME_WEBHOOK_SECRET = os.getenv("SYSTEME_WEBHOOK_SECRET", "")
+
+# Tags client produits (identiques à _CLIENT_TAG_KEYWORDS mais utilisés ici au démarrage)
+_WEBHOOK_CLIENT_TAGS = {
+    "abonnement post-formation alchimiste": "Abonnement Alchimiste",
+    "abonnement académie":                  "Abonnement Académie",
+    "alchimiste coaching":                  "Alchimiste Coaching",
+    "e-learning alchimiste":               "E-Learning Alchimiste",
+    "alchimiste e-learning":               "E-Learning Alchimiste",
+    "cure en ligne":                        "Cure en ligne",
+    "académie":                            "Académie",
+    "apprenti":                             "Apprenti",
+}
+
+def _tag_to_product(tag_name: str) -> str | None:
+    """Retourne le nom produit si le tag est un tag client, None sinon."""
+    nl = (tag_name or "").lower().strip()
+    for kw, display in _WEBHOOK_CLIENT_TAGS.items():
+        if kw in nl or nl == kw:
+            return display
+    return None
+
+
+@app.post("/api/webhook/systeme", include_in_schema=False)
+async def systeme_webhook(request: Request):
+    """
+    Reçoit CONTACT_TAG_ADDED / CONTACT_TAG_REMOVED de systeme.io.
+    Stocke chaque vente dans la table Supabase `sales_events`.
+    """
+    body_bytes = await request.body()
+
+    # ── Vérification signature HMAC (optionnelle) ──
+    if SYSTEME_WEBHOOK_SECRET:
+        sig_header = (request.headers.get("X-Webhook-Signature") or
+                      request.headers.get("X-Hub-Signature-256") or
+                      request.headers.get("X-Signature") or "")
+        expected = "sha256=" + hmac.new(
+            SYSTEME_WEBHOOK_SECRET.encode(),
+            body_bytes,
+            hashlib.sha256
+        ).hexdigest()
+        if sig_header and not hmac.compare_digest(sig_header, expected):
+            logging.warning(f"Webhook signature mismatch: {sig_header!r}")
+            # On log mais on n'interrompt pas (payload capturé pour debug)
+
+    try:
+        payload = json.loads(body_bytes)
+    except Exception:
+        return {"status": "error", "detail": "invalid JSON"}
+
+    event_type = request.headers.get("X-Webhook-Event", "")
+    logging.info(f"Webhook systeme.io: {event_type} — headers: {dict(request.headers)}")
+    logging.info(f"Webhook payload: {json.dumps(payload)[:500]}")
+
+    if event_type not in ("CONTACT_TAG_ADDED", "CONTACT_TAG_REMOVED"):
+        return {"status": "ignored", "event": event_type}
+
+    # ── Parser le payload ──
+    # Essayer plusieurs formats possibles (v1 / v2)
+    contact = payload.get("contact") or {}
+    tag     = payload.get("tag") or {}
+
+    # Timestamp de l'événement (plusieurs noms possibles)
+    event_at = (payload.get("occurredAt") or payload.get("triggeredAt") or
+                payload.get("createdAt")  or payload.get("timestamp") or
+                _dt.utcnow().isoformat() + "Z")
+
+    tag_id   = tag.get("id")
+    tag_name = tag.get("name") or ""
+    product  = _tag_to_product(tag_name)
+
+    if not product:
+        logging.info(f"Tag ignoré (non client): '{tag_name}'")
+        return {"status": "ignored", "reason": "not a client tag", "tag": tag_name}
+
+    email  = (contact.get("email") or "").lower().strip()
+    fields = contact.get("fields") or []
+    fname  = next((f.get("value", "") for f in fields if f.get("slug") == "first_name"), "")
+    lname  = next((f.get("value", "") for f in fields if f.get("slug") == "surname"), "")
+    name   = f"{fname} {lname}".strip() or email
+
+    source = "sale" if event_type == "CONTACT_TAG_ADDED" else "refund"
+
+    try:
+        sb.table("sales_events").insert({
+            "event_at":    event_at,
+            "contact_id":  contact.get("id"),
+            "email":       email,
+            "name":        name,
+            "tag_id":      tag_id,
+            "product":     product,
+            "source":      source,
+            "raw_payload": payload,
+        }).execute()
+        logging.info(f"✅ sales_events: {source} — {email} → {product} @ {event_at}")
+    except Exception as e:
+        logging.error(f"sales_events insert error: {e}")
+        return {"status": "error", "detail": str(e)}
+
+    return {"status": "ok", "source": source, "product": product, "email": email}
+
+
+@app.get("/api/sales_events")
+def get_sales_events(month: str = Query(default=None)):
+    """Nouvelles ventes du mois depuis sales_events (webhook CONTACT_TAG_ADDED)."""
+    today = date.today()
+    month = month or today.strftime("%Y-%m")
+    d_from, d_to = _month_range(month)
+
+    try:
+        rows = (sb.table("sales_events")
+                .select("event_at,email,name,product,source,contact_id")
+                .gte("event_at", f"{d_from}T00:00:00+00:00")
+                .lte("event_at", f"{d_to}T23:59:59+00:00")
+                .eq("source", "sale")
+                .order("event_at", desc=True)
+                .execute().data)
+    except Exception as e:
+        return {"month": month, "error": str(e), "events": [], "count": 0}
+
+    # Enrichir avec les transactions Pennylane (match par email)
+    if rows:
+        emails = list({r["email"] for r in rows if r.get("email")})
+        tx_rows = (sb.table("transactions")
+                   .select("date,label,amount,direction,category_name")
+                   .gte("date", d_from)
+                   .lte("date", d_to)
+                   .eq("direction", "credit")
+                   .execute().data)
+
+        by_email: dict = {}
+        for tx in tx_rows:
+            em = _extract_email(tx.get("label", ""))
+            if em and em in {r["email"] for r in rows}:
+                by_email.setdefault(em, []).append({
+                    "date":   tx["date"],
+                    "amount": round(float(tx.get("amount") or 0), 2),
+                    "label":  (tx.get("label") or "")[:80],
+                })
+
+        enriched = []
+        for r in rows:
+            txs = by_email.get(r.get("email", ""), [])
+            ca  = sum(t["amount"] for t in txs)
+            enriched.append({**r, "transactions": txs, "ca": round(ca, 2)})
+    else:
+        enriched = []
+
+    total_ca = round(sum(e.get("ca", 0) for e in enriched), 2)
+
+    return {
+        "month":    month,
+        "count":    len(enriched),
+        "total_ca": total_ca,
+        "events":   enriched,
+        "note":     "Données depuis le 01/06/2026 (date de mise en place du webhook)"
+    }
 
 
 # ── Middleware no-cache sur l'HTML (force le navigateur à recharger à chaque deploy) ──

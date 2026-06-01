@@ -438,22 +438,19 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     </div>
 
     <!-- 2 summary cards -->
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px">
-      <div class="kpi-card blue" style="cursor:default">
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+      <div class="kpi-card blue" style="cursor:pointer" onclick="openNcModal()">
+        <div class="kpi-hint">↗ détail</div>
         <div class="kpi-label">Nouvelles ventes</div>
         <div class="kpi-value" id="nc-count">—</div>
         <div class="kpi-deltas" id="nc-sub2">—</div>
       </div>
-      <div class="kpi-card green" style="cursor:default">
+      <div class="kpi-card green" style="cursor:pointer" onclick="openNcModal()">
+        <div class="kpi-hint">↗ détail</div>
         <div class="kpi-label">CA encaissé (identifié)</div>
         <div class="kpi-value" id="nc-ca">—</div>
-        <div class="kpi-deltas">depuis Pennylane via email</div>
+        <div class="kpi-deltas">via matching email Pennylane</div>
       </div>
-    </div>
-
-    <!-- Table ventes -->
-    <div id="nc-table-wrap">
-      <div style="color:#475569;text-align:center;padding:30px;font-size:13px">Chargement…</div>
     </div>
   </div>
 
@@ -641,6 +638,17 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     <div class="modal-title" id="modal-title"></div>
     <div class="modal-sub"   id="modal-sub"></div>
     <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- ════ MODAL NOUVELLES VENTES ══════════════════════════════ -->
+<div class="modal-overlay" id="nc-modal" onclick="closeNcModal()">
+  <div class="modal" style="width:880px;max-width:96vw" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeNcModal()">✕</button>
+    <div class="modal-title">Nouvelles Ventes</div>
+    <div class="modal-sub" id="nc-modal-sub" style="margin-bottom:16px"></div>
+    <div id="nc-modal-kpis" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px"></div>
+    <div id="nc-modal-body" style="max-height:55vh;overflow-y:auto"></div>
   </div>
 </div>
 
@@ -2441,6 +2449,120 @@ function renderNewClients(json) {
 
 function toggleNcDetail(i) {
   const row = document.getElementById(`nc-detail-${i}`);
+  if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+function openNcModal() {
+  if (!ncData) return;
+
+  const n = ncData.count || 0;
+  const events = ncData.events || [];
+
+  // — Subtitle
+  document.getElementById('nc-modal-sub').textContent =
+    `${n} vente${n > 1 ? 's' : ''} · ${ncData.month} · Webhook systeme.io → Supabase`;
+
+  // — KPI row
+  const matched   = events.filter(e => e.ca > 0).length;
+  document.getElementById('nc-modal-kpis').innerHTML = `
+    <div class="modal-kpi">
+      <div class="modal-kpi-label">Nouvelles ventes</div>
+      <div class="modal-kpi-val">${n}</div>
+    </div>
+    <div class="modal-kpi">
+      <div class="modal-kpi-label">CA encaissé identifié</div>
+      <div class="modal-kpi-val">${fmtEur(ncData.total_ca || 0)}</div>
+    </div>
+    <div class="modal-kpi">
+      <div class="modal-kpi-label">Matchés Pennylane</div>
+      <div class="modal-kpi-val">${matched}<span style="font-size:13px;color:#64748b;font-weight:400"> / ${n}</span></div>
+    </div>`;
+
+  // — Body
+  const bodyEl = document.getElementById('nc-modal-body');
+
+  if (!events.length) {
+    bodyEl.innerHTML = `
+      <div style="text-align:center;padding:40px 20px">
+        <div style="font-size:32px;margin-bottom:12px">🏷️</div>
+        <div style="color:#e2e8f0;font-weight:600;margin-bottom:8px">Aucune vente enregistrée ce mois</div>
+        <div style="color:#475569;font-size:12px;max-width:400px;margin:0 auto">
+          Le webhook est actif depuis le 01/06/2026. Chaque nouvelle attribution de tag client dans systeme.io apparaîtra ici en temps réel.
+        </div>
+      </div>`;
+    document.getElementById('nc-modal').classList.add('open');
+    return;
+  }
+
+  // Group events by calendar day
+  const byDay = {};
+  events.forEach((e, idx) => {
+    const d = new Date(e.event_at);
+    const key = d.toLocaleDateString('fr-FR', {year:'numeric', month:'2-digit', day:'2-digit'});
+    const label = d.toLocaleDateString('fr-FR', {weekday:'long', day:'2-digit', month:'long', year:'numeric'});
+    if (!byDay[key]) byDay[key] = { label, items: [] };
+    byDay[key].items.push({ e, idx });
+  });
+
+  let html = '';
+  Object.keys(byDay).sort((a,b)=>b.localeCompare(a)).forEach(dayKey => {
+    const { label, items } = byDay[dayKey];
+    const dayTotal = items.reduce((s, {e}) => s + (e.ca || 0), 0);
+    html += `
+    <div style="margin-bottom:22px">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2d3148;padding-bottom:8px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:600;color:#e2e8f0;text-transform:capitalize">${label}</div>
+        <div style="font-size:11px;color:#64748b">${items.length} vente${items.length>1?'s':''} · <span style="color:${dayTotal>0?'#4ade80':'#475569'}">${dayTotal>0?fmtEur(dayTotal):'à matcher'}</span></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse"><tbody>`;
+
+    items.forEach(({ e, idx }) => {
+      const d   = new Date(e.event_at);
+      const t   = d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+      const txs = e.transactions || [];
+      const hasTx = txs.length > 0;
+      const mid = `ncm${idx}`;
+      html += `
+        <tr style="border-bottom:1px solid #1e2235;${hasTx?'cursor:pointer':''}"
+            ${hasTx?`onclick="toggleNcModalDetail('${mid}')"`:''}
+            onmouseover="this.style.background='rgba(99,102,241,.05)'"
+            onmouseout="this.style.background=''">
+          <td style="padding:9px 12px;color:#475569;font-size:11px;white-space:nowrap;width:44px">${t}</td>
+          <td style="padding:9px 12px;color:#e2e8f0;font-weight:500">${e.name||'—'}</td>
+          <td style="padding:9px 12px;color:#64748b;font-size:11px">${e.email||'—'}</td>
+          <td style="padding:9px 12px">
+            <span style="background:#1e2235;border-radius:5px;padding:3px 8px;color:#a78bfa;font-size:11px;font-weight:500">${e.product}</span>
+          </td>
+          <td style="padding:9px 12px;text-align:right;white-space:nowrap;color:${e.ca>0?'#4ade80':'#475569'};font-weight:${e.ca>0?700:400}">
+            ${e.ca>0?`✅ ${fmtEur(e.ca)}`:'<span style="font-size:11px">❌ non matchée</span>'}
+          </td>
+          <td style="padding:9px 12px;color:#475569;font-size:11px;width:18px">${hasTx?'▸':''}</td>
+        </tr>
+        ${hasTx?`<tr id="nc-modal-detail-${mid}" style="display:none;background:#12141e">
+          <td colspan="6" style="padding:8px 12px 12px 44px">
+            ${txs.map(tx=>`
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #1e2235;font-size:11px">
+                <span style="color:#475569;flex-shrink:0">${tx.date}</span>
+                <span style="color:#64748b;flex:1;margin:0 14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${tx.label}</span>
+                <span style="color:#4ade80;font-weight:600;flex-shrink:0">${fmtEur(tx.amount)}</span>
+              </div>`).join('')}
+          </td>
+        </tr>`:''}`;
+    });
+
+    html += `</tbody></table></div>`;
+  });
+
+  bodyEl.innerHTML = html;
+  document.getElementById('nc-modal').classList.add('open');
+}
+
+function closeNcModal() {
+  document.getElementById('nc-modal').classList.remove('open');
+}
+
+function toggleNcModalDetail(id) {
+  const row = document.getElementById(`nc-modal-detail-${id}`);
   if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
 }
 

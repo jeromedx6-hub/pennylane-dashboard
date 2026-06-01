@@ -1465,6 +1465,222 @@ def get_systeme(refresh: bool = Query(default=False)):
         return {"data": _systeme_cache["data"], "history": _systeme_cache["history"]}
 
 
+# ── Nouveaux Clients — Pennylane × Systeme.io ──────────────────────────────────────────
+import urllib.parse as _urllib_parse
+from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor, as_completed as _as_completed
+
+# Mots-clés (lowercase) → nom produit affiché — ordre : plus précis en premier
+_CLIENT_TAG_KEYWORDS = {
+    "abonnement post-formation alchimiste": "Abonnement Alchimiste",
+    "abonnement académie":                  "Abonnement Académie",
+    "alchimiste coaching":                  "Alchimiste Coaching",
+    "e-learning alchimiste":               "E-Learning Alchimiste",
+    "alchimiste e-learning":               "E-Learning Alchimiste",
+    "cure en ligne":                        "Cure en ligne",
+    "académie":                            "Académie",
+    "apprenti":                             "Apprenti",
+}
+
+_client_tag_ids: dict | None = None   # {tag_id: product_display} — chargé 1 fois
+_client_tag_ids_lock = threading.Lock()
+_new_clients_cache: dict = {}         # month → {data, cached_at}
+_new_clients_lock = threading.Lock()
+
+
+def _ensure_client_tag_ids() -> dict:
+    global _client_tag_ids
+    with _client_tag_ids_lock:
+        if _client_tag_ids is not None:
+            return _client_tag_ids
+    result, page = {}, 1
+    while True:
+        try:
+            d = _sys_fetch(f"/tags?limit=100&page={page}")
+        except Exception:
+            break
+        for tag in d.get("items", []):
+            nl = tag["name"].lower().strip()
+            for kw, display in _CLIENT_TAG_KEYWORDS.items():
+                if kw in nl or nl == kw:
+                    result[tag["id"]] = display
+                    break
+        if not d.get("hasMore"):
+            break
+        page += 1
+    logging.info(f"Client tag IDs resolved: {result}")
+    with _client_tag_ids_lock:
+        _client_tag_ids = result
+    return result
+
+
+def _sys_contact_by_email(email: str) -> dict | None:
+    try:
+        d = _sys_fetch(f"/contacts?limit=10&email={_urllib_parse.quote(email)}")
+        for c in d.get("items", []):
+            if c.get("email", "").lower() == email.lower():
+                return c
+    except Exception:
+        pass
+    return None
+
+
+def _sys_sub_amount(contact_id: int) -> float:
+    """Retourne le montant récurrent mensuel actif pour un contact (0 si aucun)."""
+    try:
+        d = _sys_fetch(f"/payment/subscriptions?contact={contact_id}&limit=100")
+        total = 0.0
+        for s in d.get("items", []):
+            if str(s.get("status", "")).lower() not in ("active", "trialing"):
+                continue
+            plan = s.get("plan") or {}
+            raw  = (plan.get("priceValue") or plan.get("price") or
+                    plan.get("amount") or s.get("amount") or 0)
+            amt  = float(raw)
+            # systeme.io peut renvoyer en centimes → heuristique
+            if amt > 1000:
+                amt /= 100
+            total += amt
+        return round(total, 2)
+    except Exception:
+        return 0.0
+
+
+@app.get("/api/new_clients")
+def get_new_clients(month: str = Query(default=None)):
+    """Nouveaux clients du mois : Pennylane transactions × enrichissement systeme.io."""
+    if not SYSTEME_KEY:
+        return {"error": "SYSTEME_API_KEY non configuré"}
+
+    today = date.today()
+    month = month or today.strftime("%Y-%m")
+    d_from, d_to = _month_range(month)
+
+    # ── Cache ──
+    with _new_clients_lock:
+        cached = _new_clients_cache.get(month)
+        if cached:
+            if (_dt.utcnow() - _dt.fromisoformat(cached["cached_at"])).seconds < 1800:
+                return cached["data"]
+
+    # ── 1. Transactions Pennylane depuis Supabase ──
+    rev_cats = (sb.table("category_mapping")
+                .select("pennylane_category_name")
+                .eq("is_revenue", True)
+                .execute().data)
+    cat_set = {r["pennylane_category_name"] for r in rev_cats}
+
+    DATE_HISTORY = "2026-01-01"
+
+    def _fetch_credit(gte: str, max_p=15):
+        rows, pg, sz = [], 0, 1000
+        while pg < max_p:
+            batch = (sb.table("transactions")
+                     .select("date,label,amount,category_name,direction")
+                     .eq("direction", "credit")
+                     .gte("date", gte)
+                     .order("date")
+                     .range(pg * sz, (pg + 1) * sz - 1)
+                     .execute().data)
+            rows.extend(batch)
+            if len(batch) < sz:
+                break
+            pg += 1
+        return rows
+
+    period_all = _fetch_credit(d_from)
+    period_raw = [tx for tx in period_all
+                  if tx["date"] <= d_to and tx.get("category_name") in cat_set]
+    before_raw = [tx for tx in _fetch_credit(DATE_HISTORY)
+                  if tx["date"] < d_from and tx.get("category_name") in cat_set]
+
+    for tx in period_raw + before_raw:
+        tx["email"] = _extract_email(tx.get("label", ""))
+        tx["name"]  = _extract_name(tx.get("label", ""))
+
+    period_ok     = [tx for tx in period_raw if tx["email"]]
+    emails_before = {tx["email"] for tx in before_raw if tx["email"]}
+
+    # Grouper par email
+    by_email: dict = {}
+    for tx in period_ok:
+        em = tx["email"]
+        if em not in by_email:
+            by_email[em] = {"email": em, "name": tx["name"] or em, "txs": []}
+        by_email[em]["txs"].append(tx)
+
+    # Garder uniquement les NOUVEAUX (jamais achetés avant)
+    new_infos = {em: info for em, info in by_email.items() if em not in emails_before}
+
+    if not new_infos:
+        result = {"month": month, "clients": [], "count": 0,
+                  "total_ca": 0.0, "total_recurring": 0.0, "ca_restant": 0.0}
+        with _new_clients_lock:
+            _new_clients_cache[month] = {"data": result, "cached_at": _dt.utcnow().isoformat()}
+        return result
+
+    # ── 2. Enrichissement systeme.io (parallèle) ──
+    client_tags = _ensure_client_tag_ids() if SYSTEME_KEY else {}
+    client_tag_set = set(client_tags.keys())
+    enriched: dict = {}
+
+    def _enrich(email: str, info: dict):
+        ca = sum(float(tx.get("amount") or 0) for tx in info["txs"])
+        # Produit par défaut = catégorie Pennylane
+        product = info["txs"][0].get("category_name", "—") if info["txs"] else "—"
+        has_sub  = False
+        recurring = 0.0
+        contact  = _sys_contact_by_email(email)
+        if contact:
+            # Produit depuis les tags
+            cids = {t["id"] for t in contact.get("tags", [])}
+            match = cids & client_tag_set
+            if match:
+                product = client_tags[next(iter(match))]
+            # Abonnement récurrent
+            sub_amt = _sys_sub_amount(contact["id"])
+            if sub_amt > 0:
+                has_sub   = True
+                recurring = sub_amt
+        enriched[email] = {
+            "email":        email,
+            "name":         info["name"],
+            "product":      product,
+            "ca":           round(ca, 2),
+            "has_sub":      has_sub,
+            "recurring":    recurring,
+            "transactions": [
+                {"date": tx["date"],
+                 "amount": round(float(tx.get("amount") or 0), 2),
+                 "label": (tx.get("label") or "")[:80]}
+                for tx in sorted(info["txs"], key=lambda x: x["date"])
+            ],
+        }
+
+    with _ThreadPoolExecutor(max_workers=6) as pool:
+        futs = {pool.submit(_enrich, em, info): em for em, info in new_infos.items()}
+        for f in _as_completed(futs, timeout=60):
+            try:
+                f.result()
+            except Exception as ex:
+                logging.warning(f"enrich client error: {ex}")
+
+    clients = sorted(enriched.values(), key=lambda x: x["ca"], reverse=True)
+    total_ca        = round(sum(c["ca"]        for c in clients), 2)
+    total_recurring = round(sum(c["recurring"] for c in clients), 2)
+
+    result = {
+        "month":           month,
+        "clients":         clients,
+        "count":           len(clients),
+        "total_ca":        total_ca,
+        "total_recurring": total_recurring,
+        "ca_restant":      total_recurring,   # = ce qui sera encaissé le mois prochain
+    }
+    with _new_clients_lock:
+        _new_clients_cache[month] = {"data": result, "cached_at": _dt.utcnow().isoformat()}
+    return result
+
+
 # ── Middleware no-cache sur l'HTML (force le navigateur à recharger à chaque deploy) ──
 class NoCacheHTMLMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):

@@ -1461,6 +1461,18 @@ def get_systeme(refresh: bool = Query(default=False)):
         return {"data": _systeme_cache["data"], "history": _systeme_cache["history"]}
 
 
+@app.get("/api/systeme/debug-contact", include_in_schema=False)
+def debug_contact():
+    """Retourne les 3 premiers contacts bruts pour inspecter les champs de date."""
+    if not SYSTEME_KEY:
+        return {"error": "no key"}
+    try:
+        d = _sys_fetch("/contacts?limit=3&page=1")
+        return {"items": d.get("items", []), "hasMore": d.get("hasMore")}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Nouveaux Clients — Pennylane × Systeme.io ──────────────────────────────────────────
 import urllib.parse as _urllib_parse
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor, as_completed as _as_completed

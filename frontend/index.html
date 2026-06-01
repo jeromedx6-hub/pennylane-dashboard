@@ -1438,6 +1438,8 @@ function renderModalRoas(d) {
 }
 
 // ── Modal Ratio coût / CA HT — historique mensuel ────────────
+let chartRatioLine = null;
+
 function renderModalRatio(d, type) {
   const CFG = {
     acq: { label:'Coûts Acquisition',   field:'total_acquisition', section:2, color:'#60a5fa', warn:30, danger:50 },
@@ -1460,7 +1462,6 @@ function renderModalRatio(d, type) {
     return { month: r.month, cost: c, ca: r.ca_ht, ratio: rt, color: rc2 };
   });
 
-  // Moy sur les mois actifs
   const active = rows.filter(r => r.ratio !== null && r.ratio > 0);
   const avg    = active.length ? active.reduce((s,r)=>s+r.ratio,0)/active.length : 0;
 
@@ -1485,7 +1486,6 @@ function renderModalRatio(d, type) {
     </tr>`;
   }).join('');
 
-  // Détail postes mois courant
   let detailRows = plRows.map(r => `
     <tr><td>${r.poste_budgetaire}</td>
     <td class="negative">— ${fmtEur(Math.abs(r.amount))}</td>
@@ -1496,16 +1496,63 @@ function renderModalRatio(d, type) {
   <div class="modal-kpi-row">
     ${kpiBlock('Ratio actuel', `<span style="color:${rc}">${fmt(ratio,1)}%</span>`)}
     ${kpiBlock(cfg.label, fmtEur(cost))}
-    ${kpiBlock('Moyenne 12 mois', `<span style="color:${avg>=cfg.danger?'#f87171':avg>=cfg.warn?'#fb923c':'#4ade80'}">${fmt(avg,1)}%</span>`)}
+    ${kpiBlock('Moyenne ' + rows.length + ' mois', `<span style="color:${avg>=cfg.danger?'#f87171':avg>=cfg.warn?'#fb923c':'#4ade80'}">${fmt(avg,1)}%</span>`)}
   </div>
-  ${detailRows ? `<div class="modal-section">Détail postes — mois sélectionné</div>
+  <canvas id="chart-ratio-line" height="110"></canvas>
+  ${detailRows ? `<div class="modal-section" style="margin-top:16px">Détail postes — mois sélectionné</div>
   <table class="detail-table"><thead><tr><th>Poste</th><th>Montant</th><th>% CA</th></tr></thead>
   <tbody>${detailRows}</tbody></table>` : ''}
-  <div class="modal-section" style="margin-top:16px">Évolution mensuelle — Ratio ${cfg.label} / CA HT</div>
+  <div class="modal-section" style="margin-top:16px">Tableau mensuel</div>
   <table class="detail-table">
     <thead><tr><th>Mois</th><th>CA HT</th><th>${cfg.label}</th><th>Ratio</th></tr></thead>
     <tbody>${tableRows}</tbody>
   </table>`;
+
+  // Graphique barres (montant €) + ligne (ratio %)
+  if (chartRatioLine) { chartRatioLine.destroy(); chartRatioLine = null; }
+  const ctx = document.getElementById('chart-ratio-line')?.getContext('2d');
+  if (!ctx || !rows.length) return;
+
+  const barColors = rows.map(r => (r.color || cfg.color) + '99');
+  chartRatioLine = new Chart(ctx, {
+    data: {
+      labels: rows.map(r => monthLabel(r.month)),
+      datasets: [
+        {
+          type: 'bar', label: cfg.label,
+          data: rows.map(r => r.cost),
+          backgroundColor: barColors, borderColor: cfg.color,
+          borderWidth: 1, borderRadius: 4, yAxisID: 'y',
+        },
+        {
+          type: 'line', label: 'Ratio % CA',
+          data: rows.map(r => r.ratio),
+          borderColor: '#e2e8f0', backgroundColor: 'transparent',
+          borderWidth: 2, pointBackgroundColor: rows.map(r => r.color),
+          pointRadius: 4, tension: 0.3, yAxisID: 'y2',
+        }
+      ]
+    },
+    plugins: [ChartDataLabels],
+    options: {
+      responsive: true,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { labels:{ color:'#94a3b8', font:{size:11}, boxWidth:12, padding:12 } },
+        tooltip: { callbacks:{ label: c => c.datasetIndex===0 ? ` ${c.dataset.label}: ${fmtEur(c.raw)}` : ` Ratio: ${fmt(c.raw,1)}%` } },
+        datalabels: {
+          display: c => c.datasetIndex === 0 && c.dataset.data[c.dataIndex] > 0,
+          color:'#94a3b8', font:{size:9}, anchor:'end', align:'top',
+          formatter: v => fmtShort(v)+'€',
+        }
+      },
+      scales: {
+        x:  { grid:{color:'#1e2235'}, ticks:{color:'#475569', font:{size:10}} },
+        y:  { position:'left',  grid:{color:'#1e2235'}, ticks:{color:'#94a3b8', font:{size:10}, callback: v=>fmtShort(v)+'€'} },
+        y2: { position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#e2e8f0', font:{size:10}, callback: v=>fmt(v,0)+'%'} },
+      }
+    }
+  });
 }
 
 // ── P&L Evolution Modal (ligne individuelle ou total section) ─

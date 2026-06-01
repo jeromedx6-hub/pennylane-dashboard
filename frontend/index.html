@@ -834,21 +834,27 @@ function renderKPIs(d) {
   const rOps = r(d.total_ops,         25, 40);
   const rStr = r(d.total_structure,   20, 35);
 
-  const ratioCard = (color, label, ratio, amount) => `
-    <div class="kpi-card ${color}">
+  const ratioCard = (color, label, ratio, amount, modalKey) => {
+    const barW = ratio.v !== null ? Math.min(ratio.v, 100) : 0;
+    return `
+    <div class="kpi-card ${color}" onclick="openModal('${modalKey}')" style="cursor:pointer">
+      <div class="kpi-hint">↗ détail</div>
       <div class="kpi-label">${label}</div>
-      <div class="kpi-value" style="color:${ratio.color};font-size:26px">
-        ${ratio.v !== null ? fmt(ratio.v,1)+'<sup>%</sup>' : '—'}
+      <div class="kpi-value" style="color:${ratio.color};font-size:26px;margin-bottom:6px">
+        ${ratio.v !== null ? fmt(ratio.v,1)+'<sup style="font-size:13px">%</sup>' : '—'}
+      </div>
+      <div style="height:3px;background:#1e2235;border-radius:2px;margin-bottom:8px;overflow:hidden">
+        <div style="height:100%;width:${barW}%;background:${ratio.color};border-radius:2px;transition:width .6s;opacity:.7"></div>
       </div>
       <div class="kpi-deltas"><span style="font-size:11px;color:#475569">${fmtEur(Math.abs(amount))}</span></div>
-    </div>`;
+    </div>`};
 
   const row3 = document.getElementById('kpi-row3');
   if (row3) row3.innerHTML =
-    ratioCard('blue',   'Acquisition / CA HT',    rAcq, d.total_acquisition) +
-    ratioCard('purple', 'Sales &amp; Closing / CA HT', rSal, d.total_sales) +
-    ratioCard('green',  'Opérationnel / CA HT',   rOps, d.total_ops) +
-    ratioCard('orange', 'Structure / CA HT',       rStr, d.total_structure);
+    ratioCard('blue',   'Acquisition / CA HT',       rAcq, d.total_acquisition, 'ratio-acq') +
+    ratioCard('purple', 'Sales &amp; Closing / CA HT', rSal, d.total_sales,       'ratio-sal') +
+    ratioCard('green',  'Opérationnel / CA HT',      rOps, d.total_ops,          'ratio-ops') +
+    ratioCard('orange', 'Structure / CA HT',          rStr, d.total_structure,    'ratio-str');
 }
 
 // ── Evolution Chart (stacked décomposé) ─────────────────────
@@ -1314,6 +1320,22 @@ async function openModal(type) {
       document.getElementById('modal-title').textContent = 'ROAS Cash — Détail Acquisition';
       renderModalRoas(d);
       break;
+    case 'ratio-acq':
+      document.getElementById('modal-title').textContent = 'Acquisition / CA HT — Évolution mensuelle';
+      renderModalRatio(d, 'acq');
+      break;
+    case 'ratio-sal':
+      document.getElementById('modal-title').textContent = 'Sales & Closing / CA HT — Évolution mensuelle';
+      renderModalRatio(d, 'sal');
+      break;
+    case 'ratio-ops':
+      document.getElementById('modal-title').textContent = 'Opérationnel / CA HT — Évolution mensuelle';
+      renderModalRatio(d, 'ops');
+      break;
+    case 'ratio-str':
+      document.getElementById('modal-title').textContent = 'Structure / CA HT — Évolution mensuelle';
+      renderModalRatio(d, 'str');
+      break;
   }
 }
 
@@ -1413,6 +1435,77 @@ function renderModalRoas(d) {
       .map(r=>`<tr><td>${r.poste_budgetaire}</td><td class="negative">— ${fmtEur(Math.abs(r.amount))}</td><td>${fmt(Math.abs(r.amount)/d.ca_ht*100,1)}%</td></tr>`).join('')}
     <tr><td>TOTAL ACQUISITION</td><td class="negative">${fmtEur(d.total_acquisition)}</td><td>${fmtPct(d.total_acquisition/d.ca_ht*100)}</td></tr>
   </tbody></table>`;
+}
+
+// ── Modal Ratio coût / CA HT — historique mensuel ────────────
+function renderModalRatio(d, type) {
+  const CFG = {
+    acq: { label:'Coûts Acquisition',   field:'total_acquisition', section:2, color:'#60a5fa', warn:30, danger:50 },
+    sal: { label:'Sales & Closing',      field:'total_sales',       section:3, color:'#a78bfa', warn:15, danger:25 },
+    ops: { label:'Coûts Opérationnels',  field:'total_ops',         section:4, color:'#4ade80', warn:25, danger:40 },
+    str: { label:'Frais de Structure',   field:'total_structure',   section:5, color:'#fb923c', warn:20, danger:35 },
+  };
+  const cfg   = CFG[type];
+  const ca    = d.ca_ht || 0;
+  const cost  = Math.abs(d[cfg.field] || 0);
+  const ratio = ca > 0 ? cost / ca * 100 : 0;
+  const rc    = ratio >= cfg.danger ? '#f87171' : ratio >= cfg.warn ? '#fb923c' : '#4ade80';
+
+  // Historique depuis state.evol
+  const evol  = (state.evol || []).filter(r => r.ca_ht > 0);
+  const rows  = evol.map(r => {
+    const c  = Math.abs(r[cfg.field] || 0);
+    const rt = r.ca_ht > 0 ? c / r.ca_ht * 100 : null;
+    const rc2 = rt === null ? '#64748b' : rt >= cfg.danger ? '#f87171' : rt >= cfg.warn ? '#fb923c' : '#4ade80';
+    return { month: r.month, cost: c, ca: r.ca_ht, ratio: rt, color: rc2 };
+  });
+
+  // Moy sur les mois actifs
+  const active = rows.filter(r => r.ratio !== null && r.ratio > 0);
+  const avg    = active.length ? active.reduce((s,r)=>s+r.ratio,0)/active.length : 0;
+
+  // P&L détail du mois courant
+  const plRows = (state.pl||[]).filter(r=>r.pl_section===cfg.section&&!r.is_revenue)
+    .sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
+
+  let tableRows = rows.map(r => {
+    const bar = r.ratio !== null ? Math.min(r.ratio, 100) : 0;
+    return `<tr>
+      <td>${monthLabel(r.month)}</td>
+      <td style="color:#94a3b8">${fmtEur(r.ca)}</td>
+      <td style="color:#e2e8f0">${fmtEur(r.cost)}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:4px;background:#1e2235;border-radius:2px;min-width:60px">
+            <div style="height:100%;width:${bar}%;background:${r.color};border-radius:2px"></div>
+          </div>
+          <span style="color:${r.color};font-weight:600;font-size:12px;min-width:42px;text-align:right">${r.ratio!==null?fmt(r.ratio,1)+'%':'—'}</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  // Détail postes mois courant
+  let detailRows = plRows.map(r => `
+    <tr><td>${r.poste_budgetaire}</td>
+    <td class="negative">— ${fmtEur(Math.abs(r.amount))}</td>
+    <td>${ca>0?fmt(Math.abs(r.amount)/ca*100,1)+'%':'—'}</td></tr>`).join('');
+  if (detailRows) detailRows += `<tr style="font-weight:700"><td>TOTAL ${cfg.label.toUpperCase()}</td><td class="negative">— ${fmtEur(cost)}</td><td style="color:${rc}">${fmt(ratio,1)}%</td></tr>`;
+
+  document.getElementById('modal-body').innerHTML = `
+  <div class="modal-kpi-row">
+    ${kpiBlock('Ratio actuel', `<span style="color:${rc}">${fmt(ratio,1)}%</span>`)}
+    ${kpiBlock(cfg.label, fmtEur(cost))}
+    ${kpiBlock('Moyenne 12 mois', `<span style="color:${avg>=cfg.danger?'#f87171':avg>=cfg.warn?'#fb923c':'#4ade80'}">${fmt(avg,1)}%</span>`)}
+  </div>
+  ${detailRows ? `<div class="modal-section">Détail postes — mois sélectionné</div>
+  <table class="detail-table"><thead><tr><th>Poste</th><th>Montant</th><th>% CA</th></tr></thead>
+  <tbody>${detailRows}</tbody></table>` : ''}
+  <div class="modal-section" style="margin-top:16px">Évolution mensuelle — Ratio ${cfg.label} / CA HT</div>
+  <table class="detail-table">
+    <thead><tr><th>Mois</th><th>CA HT</th><th>${cfg.label}</th><th>Ratio</th></tr></thead>
+    <tbody>${tableRows}</tbody>
+  </table>`;
 }
 
 // ── P&L Evolution Modal (ligne individuelle ou total section) ─

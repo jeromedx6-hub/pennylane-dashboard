@@ -427,34 +427,31 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     </div>
   </div>
 
-  <!-- Nouveaux Clients -->
+  <!-- Nouvelles Ventes (webhook systeme.io) -->
   <div class="card">
     <div class="card-header" style="margin-bottom:16px">
       <div>
-        <div class="card-title">👤 &nbsp;Nouveaux Clients</div>
-        <div class="card-sub" id="nc-sub">Croisement Pennylane × Systeme.io — chargement…</div>
+        <div class="card-title">🏷️ &nbsp;Nouvelles Ventes</div>
+        <div class="card-sub" id="nc-sub">Via tags systeme.io — chargement…</div>
       </div>
-      <button class="sync-btn" id="nc-refresh-btn" onclick="fetchNewClients(true)" style="flex-shrink:0">⟳ Actualiser</button>
+      <button class="sync-btn" id="nc-refresh-btn" onclick="fetchNewClients()" style="flex-shrink:0">⟳ Actualiser</button>
     </div>
 
-    <!-- 3 summary cards -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px" id="nc-kpi-row">
+    <!-- 2 summary cards -->
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px">
       <div class="kpi-card blue" style="cursor:default">
-        <div class="kpi-label">Nouveaux clients</div>
+        <div class="kpi-label">Nouvelles ventes</div>
         <div class="kpi-value" id="nc-count">—</div>
+        <div class="kpi-deltas" id="nc-sub2">—</div>
       </div>
       <div class="kpi-card green" style="cursor:default">
-        <div class="kpi-label">CA encaissé</div>
+        <div class="kpi-label">CA encaissé (identifié)</div>
         <div class="kpi-value" id="nc-ca">—</div>
-      </div>
-      <div class="kpi-card orange" style="cursor:default">
-        <div class="kpi-label">CA récurrent / mois</div>
-        <div class="kpi-value" id="nc-recurring">—</div>
-        <div class="kpi-deltas" id="nc-restant" style="font-size:11px;color:#94a3b8"></div>
+        <div class="kpi-deltas">depuis Pennylane via email</div>
       </div>
     </div>
 
-    <!-- Table clients -->
+    <!-- Table ventes -->
     <div id="nc-table-wrap">
       <div style="color:#475569;text-align:center;padding:30px;font-size:13px">Chargement…</div>
     </div>
@@ -2340,36 +2337,25 @@ function renderRev30() {
   });
 }
 
-// ── Nouveaux Clients (KPI Revenue) ────────────────────────────
+// ── Nouvelles Ventes (sales_events webhook) ────────────────────
 let ncData = null;
-let _ncMonth = null;
 
-async function fetchNewClients(forceRefresh = false) {
+async function fetchNewClients() {
   const btn = document.getElementById('nc-refresh-btn');
   const sub = document.getElementById('nc-sub');
   if (btn) { btn.disabled = true; btn.textContent = '⟳ Chargement…'; }
-  if (sub) sub.textContent = 'Chargement — croisement Pennylane × Systeme.io (peut prendre ~15s)…';
 
-  // Détermine le mois depuis le sélecteur rev30
-  const sel = document.getElementById('rev30-month-select');
+  const sel  = document.getElementById('rev30-month-select');
   const mode = window.rev30Mode || 'rolling';
   let monthParam = '';
-  if (mode === 'month' && sel?.value) {
-    monthParam = `?month=${sel.value}`;
-    _ncMonth = sel.value;
-  } else {
-    _ncMonth = null;
-  }
+  if (mode === 'month' && sel?.value) monthParam = `?month=${sel.value}`;
 
-  const url = `${API}/api/new_clients${monthParam}`;
   try {
-    const res  = await fetch(url);
+    const res  = await fetch(`${API}/api/sales_events${monthParam}`);
     const json = await res.json();
-    if (json.error) { showToast('Erreur nouveaux clients : ' + json.error, 'error'); return; }
     ncData = json;
     renderNewClients(json);
   } catch(e) {
-    showToast('Erreur chargement nouveaux clients', 'error');
     const wrap = document.getElementById('nc-table-wrap');
     if (wrap) wrap.innerHTML = `<div style="color:#f87171;padding:20px">Erreur : ${e.message}</div>`;
   } finally {
@@ -2378,71 +2364,75 @@ async function fetchNewClients(forceRefresh = false) {
 }
 
 function renderNewClients(json) {
-  const sub = document.getElementById('nc-sub');
-  if (sub) {
-    const label = json.month ? `Mois : ${json.month}` : '30j glissants';
-    sub.textContent = `${json.count} nouveau${json.count > 1 ? 'x' : ''} client${json.count > 1 ? 's' : ''} · ${label} · Source Pennylane × Systeme.io`;
-  }
-
-  // KPI summary
+  const sub  = document.getElementById('nc-sub');
   const cnt  = document.getElementById('nc-count');
   const ca   = document.getElementById('nc-ca');
-  const rec  = document.getElementById('nc-recurring');
-  const rest = document.getElementById('nc-restant');
-  if (cnt)  cnt.textContent  = json.count.toLocaleString('fr-FR');
-  if (ca)   ca.textContent   = fmtEur(json.total_ca);
-  if (rec)  rec.textContent  = fmtEur(json.total_recurring);
-  if (rest) rest.textContent = json.total_recurring > 0
-    ? `CA restant M+1 : ${fmtEur(json.ca_restant)}`
-    : 'Aucun abonnement actif';
+  const sub2 = document.getElementById('nc-sub2');
 
-  // Table
+  const n = json.count || 0;
+  if (sub)  sub.textContent  = `${n} vente${n > 1 ? 's' : ''} · ${json.month} · Tag systeme.io → Supabase`;
+  if (cnt)  cnt.textContent  = n.toLocaleString('fr-FR');
+  if (ca)   ca.textContent   = fmtEur(json.total_ca || 0);
+  if (sub2) sub2.textContent = json.month;
+
   const wrap = document.getElementById('nc-table-wrap');
   if (!wrap) return;
 
-  if (!json.clients?.length) {
-    wrap.innerHTML = '<div style="color:#475569;text-align:center;padding:30px">Aucun nouveau client identifié sur cette période</div>';
+  const events = json.events || [];
+
+  if (!events.length) {
+    wrap.innerHTML = `
+      <div style="text-align:center;padding:40px 20px">
+        <div style="font-size:32px;margin-bottom:12px">🏷️</div>
+        <div style="color:#e2e8f0;font-weight:600;margin-bottom:8px">Aucune vente enregistrée ce mois</div>
+        <div style="color:#475569;font-size:12px;max-width:400px;margin:0 auto">
+          Le webhook est actif depuis le 01/06/2026. Chaque nouvelle attribution de tag client dans systeme.io apparaîtra ici en temps réel.
+        </div>
+      </div>`;
     return;
   }
 
-  const rows = json.clients.map((c, i) => {
-    const txTip = c.transactions.map(t => `${t.date} : ${fmtEur(t.amount)}`).join(' | ');
-    const subBadge = c.has_sub
-      ? `<span style="background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);color:#4ade80;font-size:10px;border-radius:4px;padding:2px 6px">Abonnement ${fmtEur(c.recurring)}/m</span>`
-      : '';
+  const rows = events.map((e, i) => {
+    const d   = new Date(e.event_at);
+    const dt  = d.toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit'}) + ' ' +
+                d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+    const txs = e.transactions || [];
+    const hasTx = txs.length > 0;
     return `
-      <tr style="border-bottom:1px solid #1e2235;cursor:pointer" onclick="toggleNcDetail(${i})">
-        <td style="padding:10px 14px;color:#e2e8f0;font-weight:500">${c.name}</td>
-        <td style="padding:10px 14px;color:#64748b;font-size:11px">${c.email}</td>
+      <tr style="border-bottom:1px solid #1e2235${hasTx ? ';cursor:pointer' : ''}" ${hasTx ? `onclick="toggleNcDetail(${i})"` : ''}>
+        <td style="padding:10px 14px;color:#475569;font-size:11px;white-space:nowrap">${dt}</td>
+        <td style="padding:10px 14px;color:#e2e8f0;font-weight:500">${e.name || '—'}</td>
+        <td style="padding:10px 14px;color:#64748b;font-size:11px">${e.email || '—'}</td>
         <td style="padding:10px 14px">
-          <span style="background:#1e2235;border-radius:5px;padding:3px 8px;color:#94a3b8;font-size:11px">${c.product}</span>
+          <span style="background:#1e2235;border-radius:5px;padding:3px 8px;color:#a78bfa;font-size:11px;font-weight:500">${e.product}</span>
         </td>
-        <td style="padding:10px 14px;text-align:right;color:#4ade80;font-weight:700">${fmtEur(c.ca)}</td>
-        <td style="padding:10px 14px">${subBadge}</td>
-        <td style="padding:10px 14px;color:#475569;font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${txTip}">▸</td>
+        <td style="padding:10px 14px;text-align:right;color:${e.ca > 0 ? '#4ade80' : '#475569'};font-weight:${e.ca > 0 ? '700' : '400'}">
+          ${e.ca > 0 ? fmtEur(e.ca) : '<span style="font-size:11px">non matchée</span>'}
+        </td>
+        <td style="padding:10px 14px;color:#475569;font-size:12px">${hasTx ? '▸' : ''}</td>
       </tr>
-      <tr id="nc-detail-${i}" style="display:none;background:#12141e">
+      ${hasTx ? `<tr id="nc-detail-${i}" style="display:none;background:#12141e">
         <td colspan="6" style="padding:10px 14px 14px">
-          ${c.transactions.map(t => `
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1e2235;font-size:11px">
-              <span style="color:#475569">${t.date}</span>
-              <span style="color:#94a3b8;flex:1;margin:0 16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.label}</span>
+          ${txs.map(t => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e2235;font-size:11px">
+              <span style="color:#475569;flex-shrink:0">${t.date}</span>
+              <span style="color:#64748b;flex:1;margin:0 16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.label}</span>
               <span style="color:#4ade80;font-weight:600;flex-shrink:0">${fmtEur(t.amount)}</span>
             </div>`).join('')}
         </td>
-      </tr>`;
+      </tr>` : ''}`;
   }).join('');
 
   wrap.innerHTML = `
     <table style="width:100%;border-collapse:collapse">
       <thead>
         <tr style="border-bottom:1px solid #2d3148">
+          <th style="padding:8px 14px;text-align:left;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Date</th>
           <th style="padding:8px 14px;text-align:left;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Nom</th>
           <th style="padding:8px 14px;text-align:left;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Email</th>
           <th style="padding:8px 14px;text-align:left;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Produit</th>
-          <th style="padding:8px 14px;text-align:right;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">CA encaissé</th>
-          <th style="padding:8px 14px;text-align:left;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Abonnement</th>
-          <th style="padding:8px 14px;text-align:left;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Détail</th>
+          <th style="padding:8px 14px;text-align:right;color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">CA Pennylane</th>
+          <th style="padding:8px 14px"></th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>

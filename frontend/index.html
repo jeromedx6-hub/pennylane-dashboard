@@ -294,6 +294,14 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     <div class="kpi-card purple" onclick="openModal('charges')"><div class="kpi-hint">↗ détail</div><div class="kpi-label">Marge Brute</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
   </div>
 
+  <!-- KPI Row 3 — Ratios coûts / CA HT -->
+  <div class="kpi-grid" id="kpi-row3">
+    <div class="kpi-card blue"><div class="kpi-label">Acquisition / CA HT</div><div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div></div>
+    <div class="kpi-card purple"><div class="kpi-label">Sales & Closing / CA HT</div><div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div></div>
+    <div class="kpi-card green"><div class="kpi-label">Opérationnel / CA HT</div><div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div></div>
+    <div class="kpi-card orange"><div class="kpi-label">Structure / CA HT</div><div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div></div>
+  </div>
+
   <!-- Charts row -->
   <div class="card" style="margin-bottom:20px">
     <div class="card-header">
@@ -813,6 +821,34 @@ function renderKPIs(d) {
         <div class="kpi-deltas"></div>
       </div>`).join('');
   }
+
+  // Row 3 — Ratios coûts / CA HT
+  const ca = d.ca_ht || 0;
+  const r  = (cost, warn, danger) => {
+    const v = ca > 0 ? Math.abs(cost) / ca * 100 : null;
+    const color = v === null ? '#64748b' : v >= danger ? '#f87171' : v >= warn ? '#fb923c' : '#4ade80';
+    return { v, color };
+  };
+  const rAcq = r(d.total_acquisition, 30, 50);
+  const rSal = r(d.total_sales,       15, 25);
+  const rOps = r(d.total_ops,         25, 40);
+  const rStr = r(d.total_structure,   20, 35);
+
+  const ratioCard = (color, label, ratio, amount) => `
+    <div class="kpi-card ${color}">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value" style="color:${ratio.color};font-size:26px">
+        ${ratio.v !== null ? fmt(ratio.v,1)+'<sup>%</sup>' : '—'}
+      </div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:#475569">${fmtEur(Math.abs(amount))}</span></div>
+    </div>`;
+
+  const row3 = document.getElementById('kpi-row3');
+  if (row3) row3.innerHTML =
+    ratioCard('blue',   'Acquisition / CA HT',    rAcq, d.total_acquisition) +
+    ratioCard('purple', 'Sales &amp; Closing / CA HT', rSal, d.total_sales) +
+    ratioCard('green',  'Opérationnel / CA HT',   rOps, d.total_ops) +
+    ratioCard('orange', 'Structure / CA HT',       rStr, d.total_structure);
 }
 
 // ── Evolution Chart (stacked décomposé) ─────────────────────

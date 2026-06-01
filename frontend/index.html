@@ -2573,16 +2573,24 @@ let chartCRMHistory = null;
 async function fetchCRM(forceRefresh = false) {
   const url = `${API}/api/systeme${forceRefresh ? '?refresh=true' : ''}`;
   const btn = document.getElementById('crm-refresh-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⟳ Chargement…'; }
+  if (btn) { btn.disabled = true; btn.textContent = forceRefresh ? '⟳ Calcul en cours…' : '⟳ Chargement…'; }
+
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), 90000); // 90s timeout
 
   try {
-    const res  = await fetch(url);
+    const res  = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(tid);
     const json = await res.json();
     if (json.error) { showToast('Erreur CRM : ' + json.error, 'error'); return; }
     crmData = json;
     renderCRM(json);
   } catch(e) {
-    showToast('Erreur chargement CRM', 'error');
+    clearTimeout(tid);
+    if (e.name === 'AbortError')
+      showToast('Délai dépassé — le calcul prend trop de temps', 'error');
+    else
+      showToast('Erreur chargement CRM : ' + e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '⟳ Actualiser'; }
   }

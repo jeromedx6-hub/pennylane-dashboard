@@ -1309,49 +1309,43 @@ def _sys_fetch(path: str):
         return json.loads(r.read())
 
 
-def _sys_count_contacts(after_iso: str, before_iso: str = None, max_pages: int = 40) -> int:
-    after_enc = _urllib_parse.quote(after_iso, safe='')
-    url = f"/contacts?limit=100&registeredAfter={after_enc}"
-    if before_iso:
-        before_enc = _urllib_parse.quote(before_iso, safe='')
-        url += f"&registeredBefore={before_enc}"
-    total, page = 0, 1
+def _sys_fetch_contacts_since(since_iso: str, max_pages: int = 250) -> list:
+    """Un seul passage paginé : tous les contacts depuis une date donnée."""
+    since_enc = _urllib_parse.quote(since_iso, safe='')
+    url = f"/contacts?limit=100&registeredAfter={since_enc}"
+    contacts, page = [], 1
     while page <= max_pages:
         d     = _sys_fetch(f"{url}&page={page}")
         items = d.get("items", [])
-        total += len(items)
+        contacts.extend(items)
         if not d.get("hasMore") or len(items) < 100:
             break
         page += 1
-    return total
+    return contacts
 
 
-def _sys_refresh_main() -> dict:
-    import json as _json
-    today          = date.today()
-    first_mtd      = date(today.year, today.month, 1)
-    prev_last      = first_mtd - timedelta(days=1)
-    first_prev     = date(prev_last.year, prev_last.month, 1)
+def _sys_refresh_main(contacts_2026: list = None) -> dict:
+    today      = date.today()
+    first_mtd  = date(today.year, today.month, 1)
+    prev_last  = first_mtd - timedelta(days=1)
+    first_prev = date(prev_last.year, prev_last.month, 1)
 
-    after_mtd  = f"{first_mtd.isoformat()}T00:00:00Z"
-    after_prev = f"{first_prev.isoformat()}T00:00:00Z"
-    before_prev= f"{prev_last.isoformat()}T23:59:59Z"
+    if contacts_2026 is not None:
+        # Compter depuis les contacts déjà chargés (évite un 2e appel API)
+        mtd  = sum(1 for c in contacts_2026
+                   if c.get("registeredAt", "")[:7] == today.strftime("%Y-%m"))
+        prev = sum(1 for c in contacts_2026
+                   if c.get("registeredAt", "")[:7] == prev_last.strftime("%Y-%m"))
+    else:
+        # Fallback : comptage direct si contacts non fournis
+        after_mtd   = _urllib_parse.quote(f"{first_mtd.isoformat()}T00:00:00Z",  safe='')
+        after_prev  = _urllib_parse.quote(f"{first_prev.isoformat()}T00:00:00Z", safe='')
+        before_prev = _urllib_parse.quote(f"{prev_last.isoformat()}T23:59:59Z",  safe='')
+        mtd  = sum(len(_sys_fetch(f"/contacts?limit=100&registeredAfter={after_mtd}&page={p}").get("items", []))
+                   for p in range(1, 6))
+        prev = sum(len(_sys_fetch(f"/contacts?limit=100&registeredAfter={after_prev}&registeredBefore={before_prev}&page={p}").get("items", []))
+                   for p in range(1, 6))
 
-    # Comptes contacts via threads parallèles
-    results = {}
-    def _cnt(key, after, before=None):
-        try:
-            results[key] = _sys_count_contacts(after, before)
-        except Exception as e:
-            results[key] = 0
-            logging.warning(f"systeme count {key}: {e}")
-
-    t1 = threading.Thread(target=_cnt, args=("mtd",  after_mtd))
-    t2 = threading.Thread(target=_cnt, args=("prev", after_prev, before_prev))
-    t1.start(); t2.start(); t1.join(); t2.join()
-
-    mtd  = results.get("mtd",  0)
-    prev = results.get("prev", 0)
     growth = round((mtd - prev) / prev * 100, 1) if prev else None
 
     # Enrollments formations clés
@@ -1387,41 +1381,29 @@ def _sys_refresh_main() -> dict:
     }
 
 
-def _sys_refresh_history() -> list:
-    """Retourne les nouveaux contacts par mois depuis janvier 2026."""
-    today  = date.today()
-    start  = date(2026, 1, 1)
-    months = []
-    results = {}
+def _sys_refresh_history(contacts_2026: list = None) -> list:
+    """Nouveaux contacts par mois depuis janvier 2026 — un seul appel API."""
+    today = date.today()
+    start = date(2026, 1, 1)
 
-    def _cnt_month(ym: str):
-        y, m = int(ym[:4]), int(ym[5:7])
-        first = date(y, m, 1)
-        last  = date(y, m+1, 1) - timedelta(days=1) if m < 12 else date(y, 12, 31)
-        after  = f"{first.isoformat()}T00:00:00Z"
-        before = f"{last.isoformat()}T23:59:59Z"
-        try:
-            results[ym] = _sys_count_contacts(after, before)
-        except Exception:
-            results[ym] = 0
-
-    # Construire la liste de tous les mois depuis jan 2026 jusqu'au mois en cours
-    cur = date(start.year, start.month, 1)
+    # Liste des mois à couvrir
+    months, cur = [], date(start.year, start.month, 1)
     while cur <= date(today.year, today.month, 1):
-        ym = cur.strftime("%Y-%m")
-        months.append(ym)
+        months.append(cur.strftime("%Y-%m"))
         cur = _add_months(cur, 1)
 
-    threads = []
-    for ym in months:
-        t = threading.Thread(target=_cnt_month, args=(ym,))
-        t.start()
-        threads.append(t)
+    if contacts_2026 is None:
+        contacts_2026 = _sys_fetch_contacts_since(f"{start.isoformat()}T00:00:00Z")
 
-    for t in threads:
-        t.join()
+    # Bucketer par mois à partir du champ registeredAt
+    counts: dict = {}
+    for c in contacts_2026:
+        reg = c.get("registeredAt") or ""
+        if len(reg) >= 7:
+            ym = reg[:7]
+            counts[ym] = counts.get(ym, 0) + 1
 
-    return [{"month": m, "new_contacts": results.get(m, 0)} for m in months]
+    return [{"month": m, "new_contacts": counts.get(m, 0)} for m in months]
 
 
 @app.get("/api/systeme")
@@ -1442,13 +1424,16 @@ def get_systeme(refresh: bool = Query(default=False)):
     # Premier appel ou refresh forcé → synchrone
     if refresh or (cached is None):
         try:
-            data = _sys_refresh_main()
-            history = _sys_refresh_history()
+            # Un seul appel paginé pour récupérer les contacts 2026
+            contacts_2026 = _sys_fetch_contacts_since("2026-01-01T00:00:00Z")
+            # Main + history partagent les contacts → aucun appel API redondant
+            data    = _sys_refresh_main(contacts_2026)
+            history = _sys_refresh_history(contacts_2026)
         except Exception as e:
             return {"error": str(e), "data": None}
         with _systeme_lock:
-            _systeme_cache["data"]       = data
-            _systeme_cache["history"]    = history
+            _systeme_cache["data"]         = data
+            _systeme_cache["history"]      = history
             _systeme_cache["refreshed_at"] = data["refreshed_at"]
             _systeme_cache["hist_at"]      = data["refreshed_at"]
         return {"data": data, "history": history}
@@ -1457,13 +1442,14 @@ def get_systeme(refresh: bool = Query(default=False)):
     if main_stale or hist_stale:
         def _bg():
             try:
+                c26 = _sys_fetch_contacts_since("2026-01-01T00:00:00Z")
                 if main_stale:
-                    d = _sys_refresh_main()
+                    d = _sys_refresh_main(c26)
                     with _systeme_lock:
                         _systeme_cache["data"] = d
                         _systeme_cache["refreshed_at"] = d["refreshed_at"]
                 if hist_stale:
-                    h = _sys_refresh_history()
+                    h = _sys_refresh_history(c26)
                     with _systeme_lock:
                         _systeme_cache["history"] = h
                         _systeme_cache["hist_at"] = _dt.utcnow().isoformat() + "Z"

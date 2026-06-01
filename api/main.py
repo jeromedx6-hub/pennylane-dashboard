@@ -1310,9 +1310,11 @@ def _sys_fetch(path: str):
 
 
 def _sys_count_contacts(after_iso: str, before_iso: str = None, max_pages: int = 40) -> int:
-    url = f"/contacts?limit=100&registeredAfter={after_iso}"
+    after_enc = _urllib_parse.quote(after_iso, safe='')
+    url = f"/contacts?limit=100&registeredAfter={after_enc}"
     if before_iso:
-        url += f"&registeredBefore={before_iso}"
+        before_enc = _urllib_parse.quote(before_iso, safe='')
+        url += f"&registeredBefore={before_enc}"
     total, page = 0, 1
     while page <= max_pages:
         d     = _sys_fetch(f"{url}&page={page}")
@@ -1331,9 +1333,9 @@ def _sys_refresh_main() -> dict:
     prev_last      = first_mtd - timedelta(days=1)
     first_prev     = date(prev_last.year, prev_last.month, 1)
 
-    after_mtd  = f"{first_mtd.isoformat()}T00:00:00+00:00"
-    after_prev = f"{first_prev.isoformat()}T00:00:00+00:00"
-    before_prev= f"{prev_last.isoformat()}T23:59:59+00:00"
+    after_mtd  = f"{first_mtd.isoformat()}T00:00:00Z"
+    after_prev = f"{first_prev.isoformat()}T00:00:00Z"
+    before_prev= f"{prev_last.isoformat()}T23:59:59Z"
 
     # Comptes contacts via threads parallèles
     results = {}
@@ -1386,8 +1388,9 @@ def _sys_refresh_main() -> dict:
 
 
 def _sys_refresh_history() -> list:
-    """Retourne les 6 derniers mois : nouveaux contacts par mois."""
+    """Retourne les nouveaux contacts par mois depuis janvier 2026."""
     today  = date.today()
+    start  = date(2026, 1, 1)
     months = []
     results = {}
 
@@ -1395,18 +1398,22 @@ def _sys_refresh_history() -> list:
         y, m = int(ym[:4]), int(ym[5:7])
         first = date(y, m, 1)
         last  = date(y, m+1, 1) - timedelta(days=1) if m < 12 else date(y, 12, 31)
-        after  = f"{first.isoformat()}T00:00:00+00:00"
-        before = f"{last.isoformat()}T23:59:59+00:00"
+        after  = f"{first.isoformat()}T00:00:00Z"
+        before = f"{last.isoformat()}T23:59:59Z"
         try:
             results[ym] = _sys_count_contacts(after, before)
         except Exception:
             results[ym] = 0
 
-    threads = []
-    for i in range(5, -1, -1):
-        d    = _add_months(date(today.year, today.month, 1), -i)
-        ym   = d.strftime("%Y-%m")
+    # Construire la liste de tous les mois depuis jan 2026 jusqu'au mois en cours
+    cur = date(start.year, start.month, 1)
+    while cur <= date(today.year, today.month, 1):
+        ym = cur.strftime("%Y-%m")
         months.append(ym)
+        cur = _add_months(cur, 1)
+
+    threads = []
+    for ym in months:
         t = threading.Thread(target=_cnt_month, args=(ym,))
         t.start()
         threads.append(t)

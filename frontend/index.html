@@ -715,6 +715,18 @@ async function loadSyncVersion() {
     const ver = d.sync_version || '';
     const el  = document.getElementById('sync-version');
     if (el && ver && ver !== '—') el.textContent = ver;
+
+    // Badge en retard : dot rouge + tooltip âge
+    if (d.sync_overdue) {
+      const dot = document.querySelector('.sync-badge .dot');
+      if (dot) dot.style.background = '#ef4444';
+      const timeEl = document.getElementById('sync-time');
+      if (timeEl && timeEl.textContent.startsWith('Sync OK')) {
+        const h = d.sync_age_hours ? `${d.sync_age_hours}h` : '?';
+        timeEl.textContent = `⚠ Sync en retard · ${h}`;
+        timeEl.style.color = '#f97316';
+      }
+    }
   } catch(e) {}
 }
 loadSyncVersion();

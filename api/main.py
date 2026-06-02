@@ -108,6 +108,60 @@ except Exception as _e:
     logging.warning(f"_sync_release_notes échec (non bloquant) : {_e}")
 
 
+# ── Auto-sync au démarrage si dernier sync > 23h ───────────────────────────
+def _startup_auto_sync():
+    """
+    Déclenché en background au démarrage de l'API.
+    Si last_synced_at > 23h (ou absent), lance un sync sur les 7 derniers jours.
+    Remplace le cron Railway qui n'est pas fiable en single-service.
+    """
+    try:
+        meta = sb.table("sync_meta").select("value").eq("key", "last_synced_at").execute().data
+        if meta:
+            last = _dt.fromisoformat(meta[0]["value"].rstrip("Z"))
+            age_hours = (_dt.utcnow() - last).total_seconds() / 3600
+            if age_hours < 23:
+                logging.info(f"Auto-sync: dernier sync il y a {age_hours:.1f}h — skip")
+                return
+            logging.info(f"Auto-sync: dernier sync il y a {age_hours:.1f}h — lancement")
+        else:
+            logging.info("Auto-sync: pas de last_synced_at — lancement premier sync")
+
+        today  = date.today()
+        d_from = today - timedelta(days=7)
+        d_to   = today
+
+        with _sync_lock:
+            if _sync_state["running"]:
+                logging.info("Auto-sync: un sync est déjà en cours — skip")
+                return
+            _sync_state.update({
+                "running": True, "started_at": _dt.now().strftime("%H:%M:%S"),
+                "finished_at": None, "error": None,
+                "date_from": d_from.isoformat(), "date_to": d_to.isoformat(),
+            })
+
+        import sync as _sync_mod
+        try:
+            audit = _sync_mod.run(d_from, d_to)
+            with _sync_lock:
+                _sync_state.update({"running": False,
+                                    "finished_at": _dt.now().strftime("%H:%M:%S"),
+                                    "audit": audit})
+            logging.info("Auto-sync: terminé avec succès")
+        except Exception as e:
+            with _sync_lock:
+                _sync_state.update({"running": False, "error": str(e),
+                                    "finished_at": _dt.now().strftime("%H:%M:%S")})
+            logging.error(f"Auto-sync: échec — {e}")
+
+    except Exception as e:
+        logging.warning(f"Auto-sync: erreur inattendue — {e}")
+
+
+threading.Thread(target=_startup_auto_sync, daemon=True).start()
+
+
 def _month_range(month: str) -> tuple[str, str]:
     """'2025-05' → ('2025-05-01', '2025-05-31')"""
     y, m = int(month[:4]), int(month[5:7])
@@ -892,8 +946,24 @@ def get_sync_status():
         meta_dict = {r["key"]: r["value"] for r in meta}
     except Exception:
         meta_dict = {}
-    return {**_sync_state, "sync_version": meta_dict.get("sync_version", "—"),
-            "last_synced_at": meta_dict.get("last_synced_at", "—")}
+    last_synced_at = meta_dict.get("last_synced_at", "—")
+    # Calcul de l'ancienneté du dernier sync
+    sync_age_hours = None
+    sync_overdue   = False
+    if last_synced_at and last_synced_at != "—":
+        try:
+            age = (_dt.utcnow() - _dt.fromisoformat(last_synced_at.rstrip("Z"))).total_seconds() / 3600
+            sync_age_hours = round(age, 1)
+            sync_overdue   = age > 25   # > 25h = le cron quotidien a raté
+        except Exception:
+            pass
+    return {
+        **_sync_state,
+        "sync_version":   meta_dict.get("sync_version", "—"),
+        "last_synced_at": last_synced_at,
+        "sync_age_hours": sync_age_hours,
+        "sync_overdue":   sync_overdue,
+    }
 
 
 @app.get("/api/alerts")

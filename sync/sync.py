@@ -21,7 +21,7 @@ BASE_URL         = "https://app.pennylane.com/api/external/v2"
 
 # ── Version du moteur de sync ──────────────────────────────────────────────
 # Incrémenter à chaque deploy significatif pour traçabilité dans le dashboard
-SYNC_VERSION = "2026.05.29-2"
+SYNC_VERSION = "2026.06.02-1"
 
 # IDs familles Pennylane à ignorer pour le P&L (trésorerie / technique)
 # L'API ne retourne PAS le label dans category_group, uniquement l'id numérique

@@ -842,6 +842,9 @@ function renderAll() {
   const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   const periodLbl = state.ytd ? `YTD ${state.month.slice(0,4)}` : monthLabel(state.month);
   document.getElementById('sync-time').textContent   = `Sync OK · ${now}`;
+  // Remettre le dot en vert si renderNoData l'avait passé en orange
+  const dot = document.querySelector('.sync-badge .dot');
+  if (dot) dot.style.background = '';
   document.getElementById('last-sync').textContent   = `Dernière sync · ${now}`;
   document.getElementById('pl-sub').textContent      = periodLbl;
   document.getElementById('ratios-sub').textContent  = periodLbl;
@@ -862,7 +865,45 @@ function renderAll() {
 }
 
 function renderNoData() {
-  document.getElementById('sync-time').textContent = 'Aucune donnée';
+  const monthLbl = state.ytd
+    ? `YTD ${state.month.slice(0,4)}`
+    : monthLabel(state.month);
+  document.getElementById('sync-time').textContent = `Aucune donnée · ${monthLbl}`;
+
+  // Dot orange pour indiquer l'absence de données
+  const dot = document.querySelector('#kpi-header .dot, .sync-badge .dot');
+  if (dot) dot.style.background = '#f97316';
+
+  // Vider les 3 rangées de KPI pour ne pas afficher les données du mois précédent
+  const emptyCard = (color, label) => `
+    <div class="kpi-card ${color}" style="opacity:.45;cursor:default">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value" style="color:#475569">—</div>
+    </div>`;
+
+  const row1 = document.getElementById('kpi-row1');
+  if (row1) row1.innerHTML =
+    emptyCard('green',  'CA Encaissé HT') +
+    emptyCard('red',    'Total Charges') +
+    emptyCard('blue',   'EBITDA') +
+    emptyCard('purple', 'Marge EBITDA');
+
+  const row2 = document.getElementById('kpi-row2');
+  if (row2) row2.innerHTML =
+    emptyCard('orange', 'ROAS Cash') +
+    emptyCard('blue',   'MC1 (après Acq.)') +
+    emptyCard('green',  'MC2 (après Sales)') +
+    emptyCard('purple', 'Marge Brute');
+
+  const row3 = document.getElementById('kpi-row3');
+  if (row3) row3.innerHTML =
+    emptyCard('blue',   'Acquisition / CA HT') +
+    emptyCard('purple', 'Sales &amp; Closing / CA HT') +
+    emptyCard('green',  'Opérationnel / CA HT') +
+    emptyCard('orange', 'Structure / CA HT');
+
+  // Aussi remettre le dot en vert lors du prochain renderAll réussi
+  state._dotOverride = true;
 }
 
 // ── KPI Cards ────────────────────────────────────────────────

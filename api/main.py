@@ -984,6 +984,46 @@ def sync_categories_only():
         return {"status": "error", "detail": str(e)}
 
 
+@app.post("/api/sync/recompute-pl")
+def recompute_pl(date_from: str = Query(default=None), date_to: str = Query(default=None)):
+    """
+    Recalcule pl_daily + kpis_daily depuis les transactions Supabase existantes,
+    sans appeler Pennylane. Rapide (quelques secondes).
+    Utile après ajout de mapping ou modification de catégories.
+    """
+    try:
+        import sys, importlib
+        if "sync.sync" in sys.modules:
+            _sync_mod = importlib.reload(sys.modules["sync.sync"])
+        else:
+            import sync.sync as _sync_mod
+
+        from datetime import date as _date, timedelta
+        today  = _date.today()
+        d_from = _date.fromisoformat(date_from) if date_from else _date(today.year, 1, 1)
+        d_to   = _date.fromisoformat(date_to)   if date_to   else today
+
+        mapping = {r["pennylane_category_name"]: r
+                   for r in sb.table("category_mapping").select("*").execute().data}
+        cat_families = {
+            r["label"]: (r.get("family_label") or "")
+            for r in sb.table("pennylane_categories").select("label,family_label").execute().data
+        }
+
+        current = d_from
+        count   = 0
+        while current <= d_to:
+            _sync_mod.compute_pl_daily(sb, mapping, current, cat_families=cat_families)
+            _sync_mod.compute_kpis(sb, current)
+            current += timedelta(days=1)
+            count   += 1
+
+        return {"status": "ok", "days_recomputed": count, "date_from": d_from.isoformat(), "date_to": d_to.isoformat()}
+    except Exception as e:
+        logging.error(f"recompute_pl: {e}")
+        return {"status": "error", "detail": str(e)}
+
+
 @app.get("/api/sync_status")
 def get_sync_status():
     """État du sync en cours ou dernier sync (inclut le rapport d'audit et la version)."""

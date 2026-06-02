@@ -152,14 +152,66 @@ def normalize_transaction(tx):
 
 # ── Agrégation P&L ────────────────────────────────────────────────────────
 
-def compute_pl_daily(sb, mapping, target_date):
+_DIVERS_IGNORED_FAMILIES = {"Suivi de trésorerie", "Test", "Test 156", "Transfert interne", "TVA"}
+
+def compute_pl_daily(sb, mapping, target_date, cat_families: dict | None = None):
+    """
+    cat_families : dict {category_label: family_label} — chargé une fois par batch pour perf.
+    Les catégories non mappées hors familles techniques sont regroupées dans
+    'CA Divers' (crédits) ou 'Charges Diverses' (débits).
+    """
     date_str = target_date.isoformat()
     rows = sb.table("transactions").select("*").eq("date", date_str).execute().data
+
+    if cat_families is None:
+        cat_families = {
+            r["label"]: (r.get("family_label") or "")
+            for r in sb.table("pennylane_categories").select("label,family_label").execute().data
+        }
 
     aggregated = {}
     for tx in rows:
         m = mapping.get(tx.get("category_name", ""))
         if not m or m.get("pl_section") is None:
+            # Classer dans Divers si la famille n'est pas technique
+            cat_name = tx.get("category_name") or ""
+            family   = cat_families.get(cat_name, "")
+            if not cat_name or family in _DIVERS_IGNORED_FAMILIES:
+                continue
+            is_credit = tx.get("direction") == "credit"
+            if is_credit:
+                divers_key = "__divers_revenue__"
+                m = {
+                    "poste_budgetaire": "CA Divers",
+                    "axe2_pole":        None,
+                    "axe3_analytics":   "_divers_revenue",
+                    "pl_section":       1,
+                    "is_revenue":       True,
+                }
+            else:
+                divers_key = "__divers_expenses__"
+                m = {
+                    "poste_budgetaire": "Charges Diverses",
+                    "axe2_pole":        None,
+                    "axe3_analytics":   "_divers_expenses",
+                    "pl_section":       5,
+                    "is_revenue":       False,
+                }
+            key = divers_key
+            if key not in aggregated:
+                aggregated[key] = {
+                    "date":             date_str,
+                    "poste_budgetaire": m["poste_budgetaire"],
+                    "axe2_pole":        m["axe2_pole"],
+                    "axe3_analytics":   m["axe3_analytics"],
+                    "pl_section":       m["pl_section"],
+                    "is_revenue":       m["is_revenue"],
+                    "amount":           0.0,
+                    "tx_count":         0,
+                }
+            sign = 1 if is_credit else -1
+            aggregated[key]["amount"]   += sign * float(tx["amount"] or 0)
+            aggregated[key]["tx_count"] += 1
             continue
 
         key = m["poste_budgetaire"]
@@ -375,8 +427,12 @@ def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
             auto_fixed_dates.add(change["date"])
 
         # 4c. Recalcul P&L + KPIs pour toutes les dates touchées
+        cat_families_recon = {
+            r["label"]: (r.get("family_label") or "")
+            for r in sb.table("pennylane_categories").select("label,family_label").execute().data
+        }
         for d in sorted(auto_fixed_dates):
-            compute_pl_daily(sb, mapping, date.fromisoformat(d))
+            compute_pl_daily(sb, mapping, date.fromisoformat(d), cat_families=cat_families_recon)
             compute_kpis(sb, date.fromisoformat(d))
 
         log.info(f"  ✅ {len(auto_fixed_dates)} jour(s) recalculé(s) : "
@@ -641,8 +697,13 @@ def run(date_from=None, date_to=None):
         except Exception:
             pass
 
+    # Pré-charger cat_families une fois pour tout le batch (perf)
+    cat_families = {
+        r["label"]: (r.get("family_label") or "")
+        for r in sb.table("pennylane_categories").select("label,family_label").execute().data
+    }
     for d in sorted(dates_to_compute):
-        compute_pl_daily(sb, mapping, d)
+        compute_pl_daily(sb, mapping, d, cat_families=cat_families)
         compute_kpis(sb, d)
 
     # ── 6. Customer invoices ──────────────────────────────────────────────

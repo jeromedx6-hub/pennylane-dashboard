@@ -1463,14 +1463,33 @@ def get_systeme(refresh: bool = Query(default=False)):
 
 @app.get("/api/systeme/debug-contact", include_in_schema=False)
 def debug_contact():
-    """Retourne les 3 premiers contacts bruts pour inspecter les champs de date."""
+    """Retourne les premiers contacts bruts pour inspecter les champs de date."""
     if not SYSTEME_KEY:
         return {"error": "no key"}
-    try:
-        d = _sys_fetch("/contacts?limit=10&page=1")
-        return {"items": d.get("items", []), "hasMore": d.get("hasMore")}
-    except Exception as e:
-        return {"error": str(e)}
+    # Essayer différentes combinaisons de paramètres
+    for params in [
+        "/contacts?limit=100&page=1",
+        "/contacts?limit=50&page=1",
+        "/contacts?page=1",
+        "/contacts",
+    ]:
+        try:
+            d = _sys_fetch(params)
+            items = d.get("items", [])
+            # Retourner seulement le 1er contact avec tous ses champs
+            first = items[0] if items else {}
+            return {
+                "params_used": params,
+                "total_items_on_page": len(items),
+                "hasMore": d.get("hasMore"),
+                "first_contact_keys": list(first.keys()),
+                "first_contact": first,
+            }
+        except Exception as e:
+            if "422" not in str(e) and "400" not in str(e):
+                return {"params_used": params, "error": str(e)}
+            continue
+    return {"error": "Toutes les combinaisons ont échoué (422/400)"}
 
 
 # ── Nouveaux Clients — Pennylane × Systeme.io ──────────────────────────────────────────

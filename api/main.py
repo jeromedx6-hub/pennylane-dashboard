@@ -57,24 +57,17 @@ app.add_middleware(
 sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 # ── Filtre catégories techniques Pennylane ─────────────────────────────────────
-# Familles ou noms de catégories sans intérêt pour le P&L (TVA, trésorerie, etc.)
+# Seules les familles purement techniques sont exclues (trésorerie, tests, TVA).
+# Toutes les autres catégories sont affichées — les non classifiables sont
+# regroupées sous "Divers" côté frontend.
 _CAT_IGNORED_FAMILIES = {
     "Suivi de trésorerie", "Test", "Test 156",
-    "Transfert interne", "TVA", "Pole Marketing",
-}
-_CAT_IGNORED_LABELS = {
-    "TVA",                      # peut apparaître sous famille "Structure"
-    "TVA collectée",
-    "TVA déductible",
-    "Transfert interne",
+    "Transfert interne", "TVA",
 }
 
 def _cat_is_technical(c: dict) -> bool:
-    """Retourne True si la catégorie est technique/hors P&L et doit être ignorée."""
-    return (
-        c.get("family_label") in _CAT_IGNORED_FAMILIES
-        or c.get("label") in _CAT_IGNORED_LABELS
-    )
+    """Retourne True si la catégorie est purement technique/hors P&L."""
+    return c.get("family_label") in _CAT_IGNORED_FAMILIES
 
 
 # ── Auto-sync release notes au démarrage ──────────────────────────────────────

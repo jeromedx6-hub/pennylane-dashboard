@@ -440,8 +440,7 @@ def sync_pennylane_categories(token, sb, mapping):
     - Ignore les familles sans intérêt comptable (Suivi de trésorerie, Test, TVA…)
     """
     IGNORED_FAMILIES = {"Suivi de trésorerie", "Test", "Test 156",
-                        "Transfert interne", "TVA", "Pole Marketing"}
-    IGNORED_LABELS   = {"TVA", "TVA collectée", "TVA déductible", "Transfert interne"}
+                        "Transfert interne", "TVA"}
 
     log.info("Sync miroir catégories Pennylane…")
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -506,8 +505,7 @@ def sync_pennylane_categories(token, sb, mapping):
 
         rows_to_upsert.append(row)
 
-        if is_new and not is_mapped and family_label not in IGNORED_FAMILIES \
-                and cat["label"] not in IGNORED_LABELS:
+        if is_new and not is_mapped and family_label not in IGNORED_FAMILIES:
             newly_unmapped.append({
                 "id":     cat["id"],
                 "label":  cat["label"],
@@ -537,8 +535,7 @@ def sync_pennylane_categories(token, sb, mapping):
                         if not (c["label"] in mapping
                                 and mapping[c["label"]].get("pl_section") is not None)
                         and group_map.get((c.get("category_group") or {}).get("id"), "")
-                        not in IGNORED_FAMILIES
-                        and c["label"] not in IGNORED_LABELS)
+                        not in IGNORED_FAMILIES)
     log.info(f"  Miroir OK — {len(cats)} catégories, "
              f"{total_unmapped} sans mapping, {len(newly_unmapped)} nouvelles")
     return {"total": len(cats), "unmapped": total_unmapped, "new": len(newly_unmapped)}

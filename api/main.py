@@ -56,6 +56,26 @@ app.add_middleware(
 
 sb = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
+# ── Filtre catégories techniques Pennylane ─────────────────────────────────────
+# Familles ou noms de catégories sans intérêt pour le P&L (TVA, trésorerie, etc.)
+_CAT_IGNORED_FAMILIES = {
+    "Suivi de trésorerie", "Test", "Test 156",
+    "Transfert interne", "TVA", "Pole Marketing",
+}
+_CAT_IGNORED_LABELS = {
+    "TVA",                      # peut apparaître sous famille "Structure"
+    "TVA collectée",
+    "TVA déductible",
+    "Transfert interne",
+}
+
+def _cat_is_technical(c: dict) -> bool:
+    """Retourne True si la catégorie est technique/hors P&L et doit être ignorée."""
+    return (
+        c.get("family_label") in _CAT_IGNORED_FAMILIES
+        or c.get("label") in _CAT_IGNORED_LABELS
+    )
+
 
 # ── Auto-sync release notes au démarrage ──────────────────────────────────────
 def _sync_release_notes():
@@ -952,14 +972,13 @@ def sync_categories_only():
         result = _sync_mod.sync_pennylane_categories(PENNYLANE_TOKEN, sb, mapping)
 
         # Retourner les nouvelles catégories non mappées pour affichage immédiat
-        IGNORED = {"Suivi de trésorerie", "Test", "Test 156", "Transfert interne", "TVA"}
         unmapped = (sb.table("pennylane_categories")
                     .select("id,label,family_label,first_seen")
                     .eq("is_mapped", False)
                     .order("first_seen", desc=True)
                     .limit(100)
                     .execute().data)
-        unmapped = [c for c in unmapped if c.get("family_label") not in IGNORED]
+        unmapped = [c for c in unmapped if not _cat_is_technical(c)]
 
         return {
             "status":   "ok",
@@ -1065,11 +1084,7 @@ def get_alerts(days: int = Query(default=30)):
                     .order("first_seen", desc=True)
                     .limit(50)
                     .execute().data)
-        # Exclure familles sans intérêt comptable
-        IGNORED = {"Suivi de trésorerie", "Test", "Test 156",
-                   "Transfert interne", "TVA"}
-        new_cats = [c for c in new_cats
-                    if c.get("family_label") not in IGNORED]
+        new_cats = [c for c in new_cats if not _cat_is_technical(c)]
     except Exception:
         new_cats = []
 
@@ -1189,16 +1204,13 @@ def get_mapping_status(month: str = Query(default=None)):
         })
 
     # Catégories Pennylane non mappées (hors familles techniques)
-    IGNORED = {"Suivi de trésorerie", "Test", "Test 156",
-               "Transfert interne", "TVA", "Pole Marketing"}
     try:
         unmapped_pl = (sb.table("pennylane_categories")
                        .select("id,label,family_label,first_seen")
                        .eq("is_mapped", False)
                        .order("family_label")
                        .execute().data)
-        unmapped_pl = [c for c in unmapped_pl
-                       if c.get("family_label") not in IGNORED]
+        unmapped_pl = [c for c in unmapped_pl if not _cat_is_technical(c)]
     except Exception:
         unmapped_pl = []
 

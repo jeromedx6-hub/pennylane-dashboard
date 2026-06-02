@@ -6,6 +6,7 @@ Cron Railway : 0 6 * * *
 import os, sys, logging, time, json
 from collections import defaultdict
 from datetime import date, timedelta, datetime as _dt
+from typing import Optional
 
 import requests
 from supabase import create_client
@@ -154,7 +155,7 @@ def normalize_transaction(tx):
 
 _DIVERS_IGNORED_FAMILIES = {"Suivi de trésorerie", "Test", "Test 156", "Transfert interne", "TVA"}
 
-def compute_pl_daily(sb, mapping, target_date, cat_families: dict | None = None):
+def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = None):
     """
     cat_families : dict {category_label: family_label} — chargé une fois par batch pour perf.
     Les catégories non mappées hors familles techniques sont regroupées dans

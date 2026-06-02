@@ -1309,19 +1309,33 @@ def _sys_fetch(path: str):
         return json.loads(r.read())
 
 
-def _sys_fetch_contacts_since(since_iso: str, max_pages: int = 250) -> list:
-    """Un seul passage paginé : tous les contacts depuis une date donnée."""
-    since_enc = _urllib_parse.quote(since_iso, safe='')
-    url = f"/contacts?limit=100&registeredAfter={since_enc}"
-    contacts, page = [], 1
-    while page <= max_pages:
-        d     = _sys_fetch(f"{url}&page={page}")
-        items = d.get("items", [])
-        contacts.extend(items)
-        if not d.get("hasMore") or len(items) < 100:
+def _sys_fetch_contacts_since(since_ym: str = "2026-01", max_pages: int = 300) -> list:
+    """
+    Pagine les contacts du plus récent au plus ancien (ordre API par défaut).
+    S'arrête dès qu'on dépasse since_ym (format "YYYY-MM").
+    Retourne uniquement les contacts dans la fenêtre.
+    """
+    url = "/contacts?limit=100"
+    in_range = []
+    for page in range(1, max_pages + 1):
+        try:
+            d     = _sys_fetch(f"{url}&page={page}")
+        except Exception as e:
+            logging.warning(f"systeme contacts page {page}: {e}")
             break
-        page += 1
-    return contacts
+        items = d.get("items", [])
+        if not items:
+            break
+        stop = False
+        for c in items:
+            reg = (c.get("registeredAt") or "")[:7]   # "YYYY-MM"
+            if reg < since_ym:                          # contact antérieur à la fenêtre
+                stop = True
+                break
+            in_range.append(c)
+        if stop or not d.get("hasMore"):
+            break
+    return in_range
 
 
 def _sys_refresh_main(contacts_2026: list = None) -> dict:
@@ -1337,14 +1351,10 @@ def _sys_refresh_main(contacts_2026: list = None) -> dict:
         prev = sum(1 for c in contacts_2026
                    if c.get("registeredAt", "")[:7] == prev_last.strftime("%Y-%m"))
     else:
-        # Fallback : comptage direct si contacts non fournis
-        after_mtd   = _urllib_parse.quote(f"{first_mtd.isoformat()}T00:00:00Z",  safe='')
-        after_prev  = _urllib_parse.quote(f"{first_prev.isoformat()}T00:00:00Z", safe='')
-        before_prev = _urllib_parse.quote(f"{prev_last.isoformat()}T23:59:59Z",  safe='')
-        mtd  = sum(len(_sys_fetch(f"/contacts?limit=100&registeredAfter={after_mtd}&page={p}").get("items", []))
-                   for p in range(1, 6))
-        prev = sum(len(_sys_fetch(f"/contacts?limit=100&registeredAfter={after_prev}&registeredBefore={before_prev}&page={p}").get("items", []))
-                   for p in range(1, 6))
+        # Fallback : recharger si contacts non fournis
+        c = _sys_fetch_contacts_since("2026-01")
+        mtd  = sum(1 for x in c if x.get("registeredAt", "")[:7] == today.strftime("%Y-%m"))
+        prev = sum(1 for x in c if x.get("registeredAt", "")[:7] == prev_last.strftime("%Y-%m"))
 
     growth = round((mtd - prev) / prev * 100, 1) if prev else None
 
@@ -1424,9 +1434,8 @@ def get_systeme(refresh: bool = Query(default=False)):
     # Premier appel ou refresh forcé → synchrone
     if refresh or (cached is None):
         try:
-            # Un seul appel paginé pour récupérer les contacts 2026
-            contacts_2026 = _sys_fetch_contacts_since("2026-01-01T00:00:00Z")
-            # Main + history partagent les contacts → aucun appel API redondant
+            # Paginer du plus récent → stopper dès contacts < jan 2026
+            contacts_2026 = _sys_fetch_contacts_since("2026-01")
             data    = _sys_refresh_main(contacts_2026)
             history = _sys_refresh_history(contacts_2026)
         except Exception as e:
@@ -1442,7 +1451,7 @@ def get_systeme(refresh: bool = Query(default=False)):
     if main_stale or hist_stale:
         def _bg():
             try:
-                c26 = _sys_fetch_contacts_since("2026-01-01T00:00:00Z")
+                c26 = _sys_fetch_contacts_since("2026-01")
                 if main_stale:
                     d = _sys_refresh_main(c26)
                     with _systeme_lock:

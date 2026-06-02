@@ -937,6 +937,41 @@ def trigger_sync(
     return {"status": "started", "date_from": d_from.isoformat(), "date_to": d_to.isoformat()}
 
 
+@app.post("/api/sync/categories")
+def sync_categories_only():
+    """
+    Sync rapide : récupère uniquement les catégories Pennylane → pennylane_categories.
+    5-10 secondes. Permet de détecter les nouvelles catégories sans full sync.
+    Synchrone (bloque jusqu'à la fin) pour retourner le résultat immédiatement.
+    """
+    try:
+        import sync as _sync_mod
+        PENNYLANE_TOKEN = os.environ["PENNYLANE_TOKEN"]
+        mapping = {r["pennylane_category_name"]: r
+                   for r in sb.table("category_mapping").select("*").execute().data}
+        result = _sync_mod.sync_pennylane_categories(PENNYLANE_TOKEN, sb, mapping)
+
+        # Retourner les nouvelles catégories non mappées pour affichage immédiat
+        IGNORED = {"Suivi de trésorerie", "Test", "Test 156", "Transfert interne", "TVA"}
+        unmapped = (sb.table("pennylane_categories")
+                    .select("id,label,family_label,first_seen")
+                    .eq("is_mapped", False)
+                    .order("first_seen", desc=True)
+                    .limit(100)
+                    .execute().data)
+        unmapped = [c for c in unmapped if c.get("family_label") not in IGNORED]
+
+        return {
+            "status":   "ok",
+            "stats":    result,
+            "unmapped": unmapped,
+            "count":    len(unmapped),
+        }
+    except Exception as e:
+        logging.error(f"sync_categories_only: {e}")
+        return {"status": "error", "detail": str(e)}
+
+
 @app.get("/api/sync_status")
 def get_sync_status():
     """État du sync en cours ou dernier sync (inclut le rapport d'audit et la version)."""

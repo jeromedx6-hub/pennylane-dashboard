@@ -473,6 +473,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
         <option value="180">6 derniers mois</option>
       </select>
       <div class="sync-badge"><div class="dot"></div><span id="alerts-sync-time">Chargement…</span></div>
+      <button class="sync-btn" id="sync-cats-btn" onclick="syncCategoriesNow()" style="background:rgba(99,102,241,.15);border-color:rgba(99,102,241,.3);color:#818cf8">⟳ Sync catégories Pennylane</button>
       <button class="sync-btn" onclick="loadAlerts()">⟳ Rafraîchir</button>
     </div>
   </div>
@@ -1946,6 +1947,28 @@ function showPage(page, el) {
 }
 
 // ── Alertes ───────────────────────────────────────────────────
+async function syncCategoriesNow() {
+  const btn = document.getElementById('sync-cats-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sync en cours…'; }
+  try {
+    const res  = await fetch(`${API}/api/sync/categories`, { method: 'POST' });
+    const json = await res.json();
+    if (json.status === 'ok') {
+      const n = json.count || 0;
+      if (btn) btn.textContent = `✅ ${n} catégorie(s) non mappée(s)`;
+      // Rafraîchir la page Alertes pour refléter les nouvelles catégories
+      await loadAlerts();
+    } else {
+      if (btn) btn.textContent = `❌ Erreur : ${json.detail || 'inconnue'}`;
+    }
+  } catch(e) {
+    if (btn) btn.textContent = '❌ Erreur réseau';
+  } finally {
+    if (btn) btn.disabled = false;
+    setTimeout(() => { if (btn) btn.textContent = '⟳ Sync catégories Pennylane'; }, 5000);
+  }
+}
+
 async function loadAlerts() {
   const days = (document.getElementById('alerts-days')?.value) || 30;
   try {

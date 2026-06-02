@@ -1999,7 +1999,7 @@ def get_sales_events(month: str = Query(default=None)):
 
 # ── Avoirs clients ────────────────────────────────────────────────────────────────────
 
-@app.get("/api/debug/pennylane-invoices", include_in_schema=False)
+@app.get("/api/debug-pennylane-invoices", include_in_schema=False)
 def debug_pennylane_invoices():
     """
     Diagnostic : inspecte les types de customer_invoices retournés par Pennylane.

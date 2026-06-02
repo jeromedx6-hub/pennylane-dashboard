@@ -1379,32 +1379,39 @@ def _sys_fetch(path: str):
         return json.loads(r.read())
 
 
+def _contact_date(c: dict) -> str:
+    """
+    Retourne la date de création réelle du contact (YYYY-MM-DD ou YYYY-MM-DDTHH:MM:SSZ).
+    Priorité : createdAt > registeredAt (registeredAt = date d'inscription funnel/optin,
+    pas la création du contact — peut être écrasée lors d'imports en masse).
+    """
+    return (c.get("createdAt") or c.get("registeredAt") or "")
+
+
 def _sys_fetch_contacts_since(since_ym: str = "2026-01", max_pages: int = 300) -> list:
     """
-    Pagine les contacts du plus récent au plus ancien (ordre API par défaut).
-    S'arrête dès qu'on dépasse since_ym (format "YYYY-MM").
-    Retourne uniquement les contacts dans la fenêtre.
+    Pagine TOUS les contacts (pas de stop anticipé sur la date : l'API ne trie
+    pas forcément par createdAt, donc on ne peut pas s'arrêter en cours de route).
+    Filtre côté Python sur _contact_date(c) >= since_ym.
     """
     url = "/contacts?limit=100"
     in_range = []
     for page in range(1, max_pages + 1):
         try:
-            d     = _sys_fetch(f"{url}&page={page}")
+            d = _sys_fetch(f"{url}&page={page}")
         except Exception as e:
             logging.warning(f"systeme contacts page {page}: {e}")
             break
         items = d.get("items", [])
         if not items:
             break
-        stop = False
         for c in items:
-            reg = (c.get("registeredAt") or "")[:7]   # "YYYY-MM"
-            if reg < since_ym:                          # contact antérieur à la fenêtre
-                stop = True
-                break
-            in_range.append(c)
-        if stop or not d.get("hasMore"):
+            ym = _contact_date(c)[:7]   # "YYYY-MM"
+            if ym >= since_ym:
+                in_range.append(c)
+        if not d.get("hasMore"):
             break
+    logging.info(f"_sys_fetch_contacts_since({since_ym}): {len(in_range)} contacts dans la fenêtre")
     return in_range
 
 
@@ -1417,14 +1424,14 @@ def _sys_refresh_main(contacts_2026: list = None) -> dict:
     if contacts_2026 is not None:
         # Compter depuis les contacts déjà chargés (évite un 2e appel API)
         mtd  = sum(1 for c in contacts_2026
-                   if c.get("registeredAt", "")[:7] == today.strftime("%Y-%m"))
+                   if _contact_date(c)[:7] == today.strftime("%Y-%m"))
         prev = sum(1 for c in contacts_2026
-                   if c.get("registeredAt", "")[:7] == prev_last.strftime("%Y-%m"))
+                   if _contact_date(c)[:7] == prev_last.strftime("%Y-%m"))
     else:
         # Fallback : recharger si contacts non fournis
         c = _sys_fetch_contacts_since("2026-01")
-        mtd  = sum(1 for x in c if x.get("registeredAt", "")[:7] == today.strftime("%Y-%m"))
-        prev = sum(1 for x in c if x.get("registeredAt", "")[:7] == prev_last.strftime("%Y-%m"))
+        mtd  = sum(1 for x in c if _contact_date(x)[:7] == today.strftime("%Y-%m"))
+        prev = sum(1 for x in c if _contact_date(x)[:7] == prev_last.strftime("%Y-%m"))
 
     growth = round((mtd - prev) / prev * 100, 1) if prev else None
 
@@ -1475,10 +1482,10 @@ def _sys_refresh_history(contacts_2026: list = None) -> list:
     if contacts_2026 is None:
         contacts_2026 = _sys_fetch_contacts_since(f"{start.isoformat()}T00:00:00Z")
 
-    # Bucketer par mois à partir du champ registeredAt
+    # Bucketer par mois à partir de createdAt (fallback registeredAt)
     counts: dict = {}
     for c in contacts_2026:
-        reg = c.get("registeredAt") or ""
+        reg = _contact_date(c)
         if len(reg) >= 7:
             ym = reg[:7]
             counts[ym] = counts.get(ym, 0) + 1
@@ -1542,33 +1549,36 @@ def get_systeme(refresh: bool = Query(default=False)):
 
 @app.get("/api/systeme/debug-contact", include_in_schema=False)
 def debug_contact():
-    """Retourne les premiers contacts bruts pour inspecter les champs de date."""
+    """
+    Diagnostic CRM : inspecte les champs de date des premiers contacts.
+    Permet de vérifier si createdAt / registeredAt sont les bons champs à utiliser.
+    """
     if not SYSTEME_KEY:
         return {"error": "no key"}
-    # Essayer différentes combinaisons de paramètres
-    for params in [
-        "/contacts?limit=100&page=1",
-        "/contacts?limit=50&page=1",
-        "/contacts?page=1",
-        "/contacts",
-    ]:
-        try:
-            d = _sys_fetch(params)
-            items = d.get("items", [])
-            # Retourner seulement le 1er contact avec tous ses champs
-            first = items[0] if items else {}
-            return {
-                "params_used": params,
-                "total_items_on_page": len(items),
-                "hasMore": d.get("hasMore"),
-                "first_contact_keys": list(first.keys()),
-                "first_contact": first,
-            }
-        except Exception as e:
-            if "422" not in str(e) and "400" not in str(e):
-                return {"params_used": params, "error": str(e)}
-            continue
-    return {"error": "Toutes les combinaisons ont échoué (422/400)"}
+    try:
+        d     = _sys_fetch("/contacts?limit=10&page=1")
+        items = d.get("items", [])
+        first = items[0] if items else {}
+
+        # Résumé champs date sur les 10 premiers contacts
+        date_summary = []
+        for c in items:
+            date_summary.append({
+                "email":        c.get("email", ""),
+                "createdAt":    c.get("createdAt", "—"),
+                "registeredAt": c.get("registeredAt", "—"),
+                "_contact_date_resolved": _contact_date(c)[:10],
+            })
+
+        return {
+            "total_items_on_page": len(items),
+            "hasMore":             d.get("hasMore"),
+            "first_contact_keys":  list(first.keys()),
+            "date_field_used":     "createdAt" if first.get("createdAt") else "registeredAt (fallback)",
+            "date_samples":        date_summary,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ── Nouveaux Clients — Pennylane × Systeme.io ──────────────────────────────────────────

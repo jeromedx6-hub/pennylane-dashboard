@@ -2174,6 +2174,15 @@ def get_avoirs(
 
     total_encaisse = round(sum(float(t["amount"] or 0) for t in refund_txs), 2)
 
+    # Regrouper par mois pour évolution
+    by_month_raw: dict = {}
+    for tx in refund_txs:
+        m = (tx.get("date") or "")[:7]  # "2026-05"
+        if m not in by_month_raw:
+            by_month_raw[m] = {"amount": 0.0, "tx_count": 0}
+        by_month_raw[m]["amount"]   += float(tx["amount"] or 0)
+        by_month_raw[m]["tx_count"] += 1
+
     # Regrouper par client pour synthèse
     by_client: dict = {}
     for tx in refund_txs:
@@ -2195,6 +2204,10 @@ def get_avoirs(
         "remboursements_encaisses": {
             "count":      len(refund_txs),
             "total":      total_encaisse,
+            "by_month":   [
+                {"month": m, "amount": round(v["amount"], 2), "tx_count": v["tx_count"]}
+                for m, v in sorted(by_month_raw.items())
+            ],
             "by_client":  sorted(by_client.values(), key=lambda x: -x["total"]),
             "detail":     sorted(refund_txs, key=lambda x: x["date"], reverse=True),
         },

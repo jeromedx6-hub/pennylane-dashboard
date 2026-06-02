@@ -1944,50 +1944,44 @@ function openAvoirsModal() {
   const av = state.avoirs;
   if (!av) return;
   const remb = av.remboursements_encaisses || {};
+  const year = state.month.slice(0, 4);
 
-  // Tableau par transaction
-  let rows = '';
-  for (const t of (remb.detail || [])) {
-    const name = t.name && t.name.length < 40 ? t.name : (t.email || '—');
-    rows += `<tr style="border-bottom:1px solid #1e2235">
-      <td style="padding:5px 8px;color:#94a3b8">${t.date}</td>
-      <td style="padding:5px 8px">${name}</td>
-      <td style="padding:5px 8px;color:#64748b;font-size:11px">${t.category_name || '—'}</td>
-      <td style="padding:5px 8px;text-align:right;color:#f87171;font-weight:600">— ${fmtEur(t.amount)}</td>
-    </tr>`;
+  // Ouvrir squelette modal (même pattern que les autres lignes P&L)
+  _plModalSkeleton('↩ Remboursements clients', year);
+
+  // Construire données mois/mois (format attendu par _renderPlLineContent)
+  const byMonthMap = {};
+  for (const m of (remb.by_month || [])) {
+    byMonthMap[m.month] = { amount: m.amount, tx_count: m.tx_count };
   }
 
-  openGenericModal('↩ Remboursements clients', `
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:18px">
-      <div style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:12px;text-align:center">
-        <div style="font-size:11px;color:#64748b;margin-bottom:4px">Nb remboursements</div>
-        <div style="font-size:22px;font-weight:700;color:#f87171">${remb.count || 0}</div>
-      </div>
-      <div style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:12px;text-align:center">
-        <div style="font-size:11px;color:#64748b;margin-bottom:4px">Total remboursé</div>
-        <div style="font-size:22px;font-weight:700;color:#f87171">— ${fmtEur(remb.total||0)}</div>
-      </div>
-    </div>
-    <div style="max-height:50vh;overflow-y:auto">
-    <table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead style="position:sticky;top:0;background:#12141e">
-        <tr style="color:#64748b;border-bottom:1px solid #2d3148">
-          <th style="padding:6px 8px;text-align:left;font-weight:500">Date</th>
-          <th style="padding:6px 8px;text-align:left;font-weight:500">Client</th>
-          <th style="padding:6px 8px;text-align:left;font-weight:500">Produit</th>
-          <th style="padding:6px 8px;text-align:right;font-weight:500">Montant</th>
-        </tr>
-      </thead>
-      <tbody>${rows || '<tr><td colspan="4" style="text-align:center;padding:20px;color:#475569">Aucun remboursement sur cette période</td></tr>'}</tbody>
-    </table>
-    </div>
-  `);
+  // Remplir les 12 mois de l'année avec YTD cumulé
+  const months = [];
+  let ytd = 0;
+  for (let i = 1; i <= 12; i++) {
+    const key = `${year}-${String(i).padStart(2,'0')}`;
+    const val = byMonthMap[key] || { amount: 0, tx_count: 0 };
+    ytd += val.amount;
+    months.push({ month: key, amount: val.amount, tx_count: val.tx_count, ytd });
+  }
+
+  // Adapter les transactions pour _renderPlLineContent (besoin de .date, .label, .amount)
+  const txs = (remb.detail || []).map(t => ({
+    date:          t.date,
+    label:         t.name || t.email || t.label || '—',
+    amount:        t.amount,
+    category_name: t.category_name || 'Remboursement',
+    direction:     'debit',
+  }));
+
+  _renderPlLineContent(months, false /* is_expense */, year, txs);
 }
 
 function openGenericModal(title, bodyHtml) {
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHtml;
-  document.getElementById('modal').style.display = 'flex';
+  document.getElementById('modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
 }
 
 async function openPlLineModal(poste, isRevenue) {

@@ -1467,7 +1467,7 @@ def debug_contact():
     if not SYSTEME_KEY:
         return {"error": "no key"}
     try:
-        d = _sys_fetch("/contacts?limit=3&page=1")
+        d = _sys_fetch("/contacts?limit=10&page=1")
         return {"items": d.get("items", []), "hasMore": d.get("hasMore")}
     except Exception as e:
         return {"error": str(e)}

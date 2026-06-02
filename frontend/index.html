@@ -1234,21 +1234,21 @@ function renderPL(plData, kpis) {
         <td>TOTAL CA HT</td><td class="positive">${fmtEur(kpis.ca_ht)}</td><td>100%</td>
       </tr>`;
 
-      // ── Ligne Avoirs clients ──
-      const avoirsEmis = state.avoirs?.avoirs_emis;
-      const avoirTotal = avoirsEmis?.total || 0;
-      if (avoirTotal > 0) {
-        const avoirPct = fmt(avoirTotal / ca * 100, 1);
+      // ── Ligne Remboursements / Avoirs ──
+      const remb      = state.avoirs?.remboursements_encaisses;
+      const rembTotal = remb?.total || 0;
+      if (rembTotal > 0) {
+        const rembPct = fmt(rembTotal / ca * 100, 1);
         html += `<tr class="pl-row" onclick="openAvoirsModal()" style="cursor:pointer">
-          <td style="color:#f87171">↩ Avoirs émis clients
-            <span style="font-size:10px;color:#64748b;margin-left:6px">${avoirsEmis.count} avoir(s) · cliquer pour détail</span>
+          <td style="color:#f87171">↩ Remboursements clients
+            <span style="font-size:10px;color:#64748b;margin-left:6px">${remb.count} remb. · cliquer pour détail</span>
           </td>
-          <td style="color:#f87171;font-weight:600">— ${fmtEur(avoirTotal)}</td>
-          <td style="color:#64748b">${avoirPct}%</td>
+          <td style="color:#f87171;font-weight:600">— ${fmtEur(rembTotal)}</td>
+          <td style="color:#64748b">${rembPct}%</td>
         </tr>`;
-        const caNet = kpis.ca_ht - avoirTotal;
+        const caNet = kpis.ca_ht - rembTotal;
         html += `<tr class="subtotal">
-          <td style="color:#94a3b8">CA Net d'avoirs</td>
+          <td style="color:#94a3b8">CA Net de remboursements</td>
           <td class="${caNet >= 0 ? 'positive' : 'negative'}" style="font-weight:700">${fmtEur(caNet)}</td>
           <td style="color:#64748b">${fmt(caNet/ca*100,1)}%</td>
         </tr>`;
@@ -1943,55 +1943,44 @@ function downloadAllTx() {
 function openAvoirsModal() {
   const av = state.avoirs;
   if (!av) return;
-  const emis   = av.avoirs_emis   || {};
-  const encais = av.remboursements_encaisses || {};
+  const remb = av.remboursements_encaisses || {};
 
-  const statusBadge = s => s === 'remboursé'
-    ? `<span style="color:#4ade80;font-size:10px;font-weight:600">✓ remboursé</span>`
-    : `<span style="color:#f97316;font-size:10px;font-weight:600">⏳ en attente</span>`;
-
+  // Tableau par transaction
   let rows = '';
-  for (const a of (emis.detail || [])) {
-    rows += `<tr>
-      <td>${a.date || '—'}</td>
-      <td>${a.client || '—'}</td>
-      <td>${a.invoice_number || '—'}</td>
-      <td style="color:#f87171;font-weight:600">— ${fmtEur(a.montant)}</td>
-      <td>${a.restant > 0 ? `<span style="color:#f97316">${fmtEur(a.restant)}</span>` : '<span style="color:#4ade80">0</span>'}</td>
-      <td>${statusBadge(a.statut)}</td>
+  for (const t of (remb.detail || [])) {
+    const name = t.name && t.name.length < 40 ? t.name : (t.email || '—');
+    rows += `<tr style="border-bottom:1px solid #1e2235">
+      <td style="padding:5px 8px;color:#94a3b8">${t.date}</td>
+      <td style="padding:5px 8px">${name}</td>
+      <td style="padding:5px 8px;color:#64748b;font-size:11px">${t.category_name || '—'}</td>
+      <td style="padding:5px 8px;text-align:right;color:#f87171;font-weight:600">— ${fmtEur(t.amount)}</td>
     </tr>`;
   }
 
-  const enAttenteTotal = emis.en_attente || 0;
-  const remboursTotal  = emis.rembourse  || 0;
-
-  openGenericModal('↩ Avoirs clients émis', `
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
+  openGenericModal('↩ Remboursements clients', `
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:18px">
       <div style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:12px;text-align:center">
-        <div style="font-size:11px;color:#64748b;margin-bottom:4px">Total avoirs émis</div>
-        <div style="font-size:18px;font-weight:700;color:#f87171">— ${fmtEur(emis.total||0)}</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px">Nb remboursements</div>
+        <div style="font-size:22px;font-weight:700;color:#f87171">${remb.count || 0}</div>
       </div>
       <div style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:12px;text-align:center">
-        <div style="font-size:11px;color:#64748b;margin-bottom:4px">En attente</div>
-        <div style="font-size:18px;font-weight:700;color:#f97316">${fmtEur(enAttenteTotal)}</div>
-      </div>
-      <div style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:12px;text-align:center">
-        <div style="font-size:11px;color:#64748b;margin-bottom:4px">Remboursés</div>
-        <div style="font-size:18px;font-weight:700;color:#4ade80">${fmtEur(remboursTotal)}</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px">Total remboursé</div>
+        <div style="font-size:22px;font-weight:700;color:#f87171">— ${fmtEur(remb.total||0)}</div>
       </div>
     </div>
-    ${rows ? `
+    <div style="max-height:50vh;overflow-y:auto">
     <table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead><tr style="color:#64748b;border-bottom:1px solid #2d3148">
-        <th style="padding:6px 8px;text-align:left">Date</th>
-        <th style="padding:6px 8px;text-align:left">Client</th>
-        <th style="padding:6px 8px;text-align:left">N° avoir</th>
-        <th style="padding:6px 8px;text-align:right">Montant</th>
-        <th style="padding:6px 8px;text-align:right">Restant dû</th>
-        <th style="padding:6px 8px;text-align:center">Statut</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>` : '<p style="color:#475569;text-align:center;padding:20px">Aucun avoir sur cette période</p>'}
+      <thead style="position:sticky;top:0;background:#12141e">
+        <tr style="color:#64748b;border-bottom:1px solid #2d3148">
+          <th style="padding:6px 8px;text-align:left;font-weight:500">Date</th>
+          <th style="padding:6px 8px;text-align:left;font-weight:500">Client</th>
+          <th style="padding:6px 8px;text-align:left;font-weight:500">Produit</th>
+          <th style="padding:6px 8px;text-align:right;font-weight:500">Montant</th>
+        </tr>
+      </thead>
+      <tbody>${rows || '<tr><td colspan="4" style="text-align:center;padding:20px;color:#475569">Aucun remboursement sur cette période</td></tr>'}</tbody>
+    </table>
+    </div>
   `);
 }
 

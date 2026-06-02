@@ -2143,6 +2143,9 @@ def get_avoirs(
     rev_cats = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
     cat_set  = {r["pennylane_category_name"] for r in rev_cats}
 
+    # Mots-clés indiquant un frais de traitement (pas un remboursement client)
+    _FEE_KEYWORDS = ("gocardless_fee", "surcharge_fee", "processing_fee")
+
     refund_txs, page = [], 0
     while True:
         batch = (sb.table("transactions")
@@ -2151,31 +2154,49 @@ def get_avoirs(
                  .gte("date", d_from).lte("date", d_to)
                  .range(page * 1000, (page + 1) * 1000 - 1)
                  .execute().data)
-        refund_txs.extend(r for r in batch if r.get("category_name") in cat_set)
+        for r in batch:
+            if r.get("category_name") not in cat_set:
+                continue
+            lbl = (r.get("label") or "").lower()
+            if any(k in lbl for k in _FEE_KEYWORDS):
+                continue   # frais bancaires GoCardless — pas un remboursement client
+            refund_txs.append(r)
         if len(batch) < 1000:
             break
         page += 1
 
     for tx in refund_txs:
         tx["email"] = _extract_email(tx.get("label", ""))
-        tx["name"]  = _extract_name(tx.get("label", ""))
+        # Extraire le vrai nom client depuis le label "Refund: ... - Prénom Nom - email"
+        raw_name = _extract_name(tx.get("label", ""))
+        # Nettoyage : si le "nom" extrait ressemble à une description produit, on prend l'email
+        tx["name"] = raw_name if raw_name and len(raw_name) < 50 else (tx["email"] or "")
 
     total_encaisse = round(sum(float(t["amount"] or 0) for t in refund_txs), 2)
+
+    # Regrouper par client pour synthèse
+    by_client: dict = {}
+    for tx in refund_txs:
+        key = tx["email"] or tx.get("label", "")[:40]
+        if key not in by_client:
+            by_client[key] = {"email": tx["email"], "name": tx["name"],
+                              "total": 0.0, "count": 0, "last_date": ""}
+        by_client[key]["total"] += float(tx["amount"] or 0)
+        by_client[key]["count"] += 1
+        if tx["date"] > by_client[key]["last_date"]:
+            by_client[key]["last_date"] = tx["date"]
 
     return {
         "date_from": d_from,
         "date_to":   d_to,
-        "avoirs_emis": {
-            "count":        len(avoirs_emis),
-            "total":        total_emis,
-            "en_attente":   total_en_attente,
-            "rembourse":    total_rembourse,
-            "detail":       sorted(avoirs_emis, key=lambda x: x["date"], reverse=True),
+        "avoirs_emis": {          # Pas de notes de crédit Pennylane dans cette activité
+            "count": 0, "total": 0.0, "en_attente": 0.0, "rembourse": 0.0, "detail": [],
         },
         "remboursements_encaisses": {
-            "count":  len(refund_txs),
-            "total":  total_encaisse,
-            "detail": sorted(refund_txs, key=lambda x: x["date"], reverse=True),
+            "count":      len(refund_txs),
+            "total":      total_encaisse,
+            "by_client":  sorted(by_client.values(), key=lambda x: -x["total"]),
+            "detail":     sorted(refund_txs, key=lambda x: x["date"], reverse=True),
         },
     }
 

@@ -2056,20 +2056,90 @@ def debug_pennylane_invoices():
 _PENNYLANE_BASE = "https://app.pennylane.com/api/external/v2"
 
 
+def _pl_fetch_avoirs(date_from: str, date_to: str) -> list:
+    """
+    Récupère les avoirs clients depuis Pennylane :
+    customer_invoices où credited_invoice != null.
+    Pagine jusqu'à obtenir tous les avoirs de la période.
+    """
+    import requests as _req
+    token   = os.environ.get("PENNYLANE_TOKEN", "")
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params  = {"per_page": 100, "date_gte": date_from, "date_lte": date_to}
+    avoirs  = []
+
+    while True:
+        r    = _req.get(f"{_PENNYLANE_BASE}/customer_invoices", headers=headers, params=params, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        for inv in data.get("items", []):
+            if inv.get("credited_invoice"):     # ← c'est un avoir
+                avoirs.append(inv)
+        if not data.get("has_more"):
+            break
+        params["cursor"] = data["next_cursor"]
+        time.sleep(0.26)
+
+    return avoirs
+
+
 @app.get("/api/avoirs")
 def get_avoirs(
     date_from: str = Query(default=None),
     date_to:   str = Query(default=None),
 ):
     """
-    Avoirs clients : croisement avoirs émis (Pennylane) × remboursements encaissés (transactions).
-    Retourne pour chaque avoir : montant, client, statut (remboursé / en attente), date.
+    Avoirs clients :
+    - Avoirs émis (Pennylane customer_invoices avec credited_invoice)
+    - Remboursements encaissés (transactions debit sur catégories revenus)
+    Croisement par client + montant pour détecter les avoirs encore en attente.
     """
     today  = date.today()
     d_from = date_from or f"{today.year}-01-01"
     d_to   = date_to   or today.isoformat()
 
-    # ── 1. Remboursements encaissés : transactions debit sur catégories revenus ──
+    # ── 1. Avoirs émis (Pennylane API) ────────────────────────────────────────
+    try:
+        raw_avoirs = _pl_fetch_avoirs(d_from, d_to)
+    except Exception as e:
+        raw_avoirs = []
+        logging.warning(f"avoirs: erreur fetch Pennylane — {e}")
+
+    avoirs_emis = []
+    for inv in raw_avoirs:
+        customer = inv.get("customer") or {}
+        name     = customer.get("name", "") if isinstance(customer, dict) else ""
+        amount   = abs(float(inv.get("currency_amount") or inv.get("amount") or 0))
+        remaining = abs(float(inv.get("remaining_amount_with_tax") or 0))
+        status_pl = inv.get("status", "")
+        # Statut lisible
+        if status_pl == "paid" or remaining < 0.01:
+            statut = "remboursé"
+        else:
+            statut = "en_attente"
+
+        # Facture d'origine
+        credited = inv.get("credited_invoice") or {}
+        facture_origine = (credited.get("invoice_number") or
+                           credited.get("id") or "—") if isinstance(credited, dict) else str(credited)
+
+        avoirs_emis.append({
+            "id":              inv.get("id"),
+            "date":            inv.get("date", ""),
+            "invoice_number":  inv.get("invoice_number", ""),
+            "facture_origine": facture_origine,
+            "client":          name,
+            "montant":         round(amount, 2),
+            "restant":         round(remaining, 2),
+            "statut":          statut,
+            "paid":            inv.get("paid", False),
+        })
+
+    total_emis      = round(sum(a["montant"]  for a in avoirs_emis), 2)
+    total_en_attente = round(sum(a["restant"]  for a in avoirs_emis if a["statut"] == "en_attente"), 2)
+    total_rembourse  = round(sum(a["montant"]  for a in avoirs_emis if a["statut"] == "remboursé"), 2)
+
+    # ── 2. Remboursements encaissés (transactions debit sur catégories revenus) ──
     rev_cats = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
     cat_set  = {r["pennylane_category_name"] for r in rev_cats}
 
@@ -2090,22 +2160,22 @@ def get_avoirs(
         tx["email"] = _extract_email(tx.get("label", ""))
         tx["name"]  = _extract_name(tx.get("label", ""))
 
-    total_remboursements = round(sum(float(t["amount"] or 0) for t in refund_txs), 2)
+    total_encaisse = round(sum(float(t["amount"] or 0) for t in refund_txs), 2)
 
     return {
         "date_from": d_from,
         "date_to":   d_to,
+        "avoirs_emis": {
+            "count":        len(avoirs_emis),
+            "total":        total_emis,
+            "en_attente":   total_en_attente,
+            "rembourse":    total_rembourse,
+            "detail":       sorted(avoirs_emis, key=lambda x: x["date"], reverse=True),
+        },
         "remboursements_encaisses": {
             "count":  len(refund_txs),
-            "total":  total_remboursements,
+            "total":  total_encaisse,
             "detail": sorted(refund_txs, key=lambda x: x["date"], reverse=True),
-        },
-        "avoirs_emis": {
-            "note":   "Non disponible — nécessite confirmation de l'endpoint Pennylane. "
-                      "Appelle /api/debug/pennylane-invoices pour inspecter la structure.",
-            "count":  0,
-            "total":  0.0,
-            "detail": [],
         },
     }
 

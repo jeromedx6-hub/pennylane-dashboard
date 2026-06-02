@@ -1997,6 +1997,119 @@ def get_sales_events(month: str = Query(default=None)):
     }
 
 
+# ── Avoirs clients ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/debug/pennylane-invoices", include_in_schema=False)
+def debug_pennylane_invoices():
+    """
+    Diagnostic : inspecte les types de customer_invoices retournés par Pennylane.
+    Permet de confirmer la structure des avoirs (credit_note, type, status).
+    """
+    import urllib.request as _ur
+    token = os.environ.get("PENNYLANE_TOKEN", "")
+    if not token:
+        return {"error": "PENNYLANE_TOKEN absent"}
+    headers_pl = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    results = {}
+
+    # 1. customer_invoices — voir les champs disponibles + types présents
+    try:
+        import requests as _req
+        r = _req.get(f"{_PENNYLANE_BASE}/customer_invoices",
+                     headers=headers_pl,
+                     params={"per_page": 10})
+        data = r.json()
+        items = data.get("items", [])
+        first = items[0] if items else {}
+        # Agréger les types présents
+        types = {}
+        for inv in items:
+            t = inv.get("invoice_type") or inv.get("type") or "—"
+            types[t] = types.get(t, 0) + 1
+        results["customer_invoices"] = {
+            "total_on_page": len(items),
+            "has_more":      data.get("has_more"),
+            "keys":          list(first.keys()),
+            "types_found":   types,
+            "first_item":    {k: first.get(k) for k in
+                              ["id","date","invoice_type","type","status","amount",
+                               "currency_amount","customer","label","source"] if k in first},
+        }
+    except Exception as e:
+        results["customer_invoices"] = {"error": str(e)}
+
+    # 2. Tenter un endpoint dédié /credit_notes (s'il existe)
+    for path in ["/credit_notes", "/customer_credit_notes"]:
+        try:
+            r2 = _req.get(f"{_PENNYLANE_BASE}{path}", headers=headers_pl, params={"per_page": 5})
+            if r2.status_code == 200:
+                d2 = r2.json()
+                results[path] = {"status": 200, "items": len(d2.get("items", [])),
+                                 "first_keys": list((d2.get("items") or [{}])[0].keys())}
+            else:
+                results[path] = {"status": r2.status_code}
+        except Exception as e:
+            results[path] = {"error": str(e)}
+
+    return results
+
+_PENNYLANE_BASE = "https://app.pennylane.com/api/external/v2"
+
+
+@app.get("/api/avoirs")
+def get_avoirs(
+    date_from: str = Query(default=None),
+    date_to:   str = Query(default=None),
+):
+    """
+    Avoirs clients : croisement avoirs émis (Pennylane) × remboursements encaissés (transactions).
+    Retourne pour chaque avoir : montant, client, statut (remboursé / en attente), date.
+    """
+    today  = date.today()
+    d_from = date_from or f"{today.year}-01-01"
+    d_to   = date_to   or today.isoformat()
+
+    # ── 1. Remboursements encaissés : transactions debit sur catégories revenus ──
+    rev_cats = sb.table("category_mapping").select("pennylane_category_name").eq("is_revenue", True).execute().data
+    cat_set  = {r["pennylane_category_name"] for r in rev_cats}
+
+    refund_txs, page = [], 0
+    while True:
+        batch = (sb.table("transactions")
+                 .select("date,label,amount,direction,category_name")
+                 .eq("direction", "debit")
+                 .gte("date", d_from).lte("date", d_to)
+                 .range(page * 1000, (page + 1) * 1000 - 1)
+                 .execute().data)
+        refund_txs.extend(r for r in batch if r.get("category_name") in cat_set)
+        if len(batch) < 1000:
+            break
+        page += 1
+
+    for tx in refund_txs:
+        tx["email"] = _extract_email(tx.get("label", ""))
+        tx["name"]  = _extract_name(tx.get("label", ""))
+
+    total_remboursements = round(sum(float(t["amount"] or 0) for t in refund_txs), 2)
+
+    return {
+        "date_from": d_from,
+        "date_to":   d_to,
+        "remboursements_encaisses": {
+            "count":  len(refund_txs),
+            "total":  total_remboursements,
+            "detail": sorted(refund_txs, key=lambda x: x["date"], reverse=True),
+        },
+        "avoirs_emis": {
+            "note":   "Non disponible — nécessite confirmation de l'endpoint Pennylane. "
+                      "Appelle /api/debug/pennylane-invoices pour inspecter la structure.",
+            "count":  0,
+            "total":  0.0,
+            "detail": [],
+        },
+    }
+
+
 # ── Middleware no-cache sur l'HTML (force le navigateur à recharger à chaque deploy) ──
 class NoCacheHTMLMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):

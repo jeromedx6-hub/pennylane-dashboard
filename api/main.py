@@ -997,10 +997,10 @@ def recompute_pl(date_from: str = Query(default=None), date_to: str = Query(defa
     """
     try:
         import sys, importlib
-        if "sync.sync" in sys.modules:
-            _sync_mod = importlib.reload(sys.modules["sync.sync"])
+        if "sync" in sys.modules:
+            _sync_mod = importlib.reload(sys.modules["sync"])
         else:
-            import sync.sync as _sync_mod
+            import sync as _sync_mod
 
         from datetime import date as _date, timedelta
         today  = _date.today()
@@ -1025,6 +1025,47 @@ def recompute_pl(date_from: str = Query(default=None), date_to: str = Query(defa
         return {"status": "ok", "days_recomputed": count, "date_from": d_from.isoformat(), "date_to": d_to.isoformat()}
     except Exception as e:
         logging.error(f"recompute_pl: {e}")
+        return {"status": "error", "detail": str(e)}
+
+
+@app.post("/api/sync/backfill-ht")
+def backfill_ht():
+    """
+    Recalcule amount_ht pour toutes les transactions existantes en base
+    depuis category_mapping.tva_rate. À lancer une seule fois après ajout TVA.
+    """
+    try:
+        mapping = {r["pennylane_category_name"]: r
+                   for r in sb.table("category_mapping").select("*").execute().data}
+
+        # Lire toutes les transactions par pages
+        updated, page, size = 0, 0, 1000
+        while True:
+            batch = (sb.table("transactions")
+                     .select("id,amount,category_name")
+                     .range(page * size, (page + 1) * size - 1)
+                     .execute().data)
+            if not batch:
+                break
+            rows_to_update = []
+            for tx in batch:
+                cat = tx.get("category_name") or ""
+                m   = mapping.get(cat, {})
+                tva_rate = float(m.get("tva_rate") or 0.20)
+                amt_abs  = abs(float(tx.get("amount") or 0))
+                amt_ht   = round(amt_abs / (1 + tva_rate), 2) if tva_rate > 0 else amt_abs
+                rows_to_update.append({"id": tx["id"], "amount_ht": amt_ht})
+            if rows_to_update:
+                sb.table("transactions").upsert(rows_to_update, on_conflict="id").execute()
+                updated += len(rows_to_update)
+            if len(batch) < size:
+                break
+            page += 1
+
+        logging.info(f"backfill_ht: {updated} transactions mises à jour")
+        return {"status": "ok", "transactions_updated": updated}
+    except Exception as e:
+        logging.error(f"backfill_ht: {e}")
         return {"status": "error", "detail": str(e)}
 
 

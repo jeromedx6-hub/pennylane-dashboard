@@ -91,7 +91,7 @@ def pl_get_ledger_entries(token, date_from, date_to):
     """
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     params  = {
-        "limit":          200,
+        "limit":          100,
         "updated_at_gte": date_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "updated_at_lte": (date_to + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }

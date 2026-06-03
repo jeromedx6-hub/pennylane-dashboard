@@ -338,7 +338,18 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   </div>
 
   <!-- P&L pleine largeur -->
-  <div class="card">
+  <div class="card" style="overflow:hidden">
+    <!-- Indicateur général non catégorisés (mis à jour par renderPL) -->
+    <div id="uncateg-summary-bar" onclick="openUncategorizedModal('all')" style="border-radius:0;margin:0">
+      <span class="usb-icon">⚠</span>
+      <span class="usb-label" id="usb-label">—</span>
+      <span class="usb-meta" id="usb-meta"></span>
+      <div class="usb-chips">
+        <span class="usb-chip" id="usb-chip-rev" style="display:none"></span>
+        <span class="usb-chip" id="usb-chip-exp" style="background:rgba(248,113,113,.12);color:#f87171;border-color:rgba(248,113,113,.25);display:none"></span>
+        <span class="usb-cta">↗ détail &amp; export</span>
+      </div>
+    </div>
     <div class="card-header">
       <div>
         <div class="card-title">P&L Analytique · Synthèse</div>
@@ -356,17 +367,6 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
           <button class="tab active" id="tab-month" onclick="switchPL('month',this)">Mois</button>
           <button class="tab" id="tab-ytd" onclick="switchPL('ytd',this)">YTD</button>
         </div>
-      </div>
-    </div>
-    <!-- Indicateur général non catégorisés (mis à jour par renderPL) -->
-    <div id="uncateg-summary-bar" onclick="openUncategorizedModal('all')">
-      <span class="usb-icon">⚠</span>
-      <span class="usb-label" id="usb-label">—</span>
-      <span class="usb-meta" id="usb-meta"></span>
-      <div class="usb-chips">
-        <span class="usb-chip" id="usb-chip-rev" style="display:none"></span>
-        <span class="usb-chip" id="usb-chip-exp" style="background:rgba(248,113,113,.12);color:#f87171;border-color:rgba(248,113,113,.25);display:none"></span>
-        <span class="usb-cta">↗ détail &amp; export</span>
       </div>
     </div>
     <table class="pl-table" id="pl-table">

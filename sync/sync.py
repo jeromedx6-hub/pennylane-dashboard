@@ -680,6 +680,35 @@ def run(date_from=None, date_to=None):
             transactions = list(tx_by_id.values())
             log.info(f"  Après fusion : {len(transactions)} transactions uniques")
 
+    # ── 3b. Re-fetch des transactions sans catégorie ───────────────────────
+    # Pennylane ne met pas à jour updated_at lors d'une catégorisation,
+    # donc pl_get_modified_since ne les remonte pas. On les re-fetch par date.
+    uncategorized_in_sb = (
+        sb.table("transactions")
+        .select("date")
+        .eq("category_name", "")
+        .execute().data
+    )
+    if uncategorized_in_sb:
+        # Regrouper par plages de dates pour minimiser les appels API
+        uncateg_dates = sorted({r["date"] for r in uncategorized_in_sb})
+        log.info(f"  {len(uncateg_dates)} dates avec tx sans catégorie → re-fetch Pennylane")
+        tx_by_id = {tx["id"]: tx for tx in transactions}
+        # Re-fetch par plage (date_min → date_max des dates concernées)
+        d_unc_from = date.fromisoformat(uncateg_dates[0])
+        d_unc_to   = date.fromisoformat(uncateg_dates[-1])
+        refetched  = pl_get_transactions(PENNYLANE_TOKEN, d_unc_from, d_unc_to)
+        added = 0
+        for tx in refetched:
+            tx_id = tx["id"]
+            cats  = tx.get("categories") or []
+            if cats:  # seulement si maintenant catégorisée
+                tx_by_id[tx_id] = tx
+                added += 1
+        if added:
+            transactions = list(tx_by_id.values())
+            log.info(f"  {added} tx précédemment vides maintenant catégorisées → fusionnées")
+
     # ── 4. Normalisation + upsert Supabase ────────────────────────────────
     rows = [r for r in (normalize_transaction(tx) for tx in transactions) if r]
     if rows:

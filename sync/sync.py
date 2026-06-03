@@ -82,6 +82,48 @@ def pl_get_transactions(token, date_from, date_to):
     return rows
 
 
+def pl_get_ledger_entries(token, date_from, date_to):
+    """
+    Récupère les écritures comptables (ledger_entries) pour une période.
+    Retourne un dict {label_transaction: category_label} pour enrichir
+    les transactions dont categories[] est vide (catégorisées par le comptable).
+    Utilise la pagination cursor-based (API 2026).
+    """
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params  = {
+        "limit":          200,
+        "updated_at_gte": date_from.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "updated_at_lte": (date_to + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    # label → catégorie principale (première avec weight le plus haut)
+    label_to_cat: dict = {}
+    try:
+        while True:
+            r = requests.get(f"{BASE_URL}/ledger_entries", headers=headers, params=params)
+            if not r.ok:
+                log.warning(f"  ledger_entries: {r.status_code} — {r.text[:100]}")
+                break
+            data  = r.json()
+            items = data.get("items", [])
+            for entry in items:
+                cats = entry.get("categories") or []
+                if not cats:
+                    continue
+                lbl = entry.get("label", "").strip()
+                if not lbl:
+                    continue
+                best = max(cats, key=lambda c: float(c.get("weight", 0)))
+                label_to_cat[lbl] = best.get("label", "")
+            if not data.get("has_more"):
+                break
+            params["cursor"] = data["next_cursor"]
+            time.sleep(0.26)
+    except Exception as e:
+        log.warning(f"  ledger_entries exception: {e}")
+    log.info(f"  ledger_entries: {len(label_to_cat)} entries avec catégorie ({date_from} → {date_to})")
+    return label_to_cat
+
+
 def pl_get_modified_since(token, since_dt):
     """
     Récupère TOUTES les transactions modifiées depuis since_dt via updated_at_gte.
@@ -708,6 +750,28 @@ def run(date_from=None, date_to=None):
         if added:
             transactions = list(tx_by_id.values())
             log.info(f"  {added} tx précédemment vides maintenant catégorisées → fusionnées")
+
+    # ── 3c. Enrichissement via ledger_entries (catégories comptables) ─────────
+    # Pour les tx dont categories[] est vide, chercher la catégorie dans les
+    # écritures comptables (assignées par le comptable via journal d'écriture).
+    try:
+        ledger_map = pl_get_ledger_entries(PENNYLANE_TOKEN, date_from, date_to)
+        if ledger_map:
+            enriched = 0
+            for tx in transactions:
+                if tx.get("categories"):
+                    continue   # déjà catégorisée via analytics
+                lbl = (tx.get("label") or "").strip()
+                cat_from_ledger = ledger_map.get(lbl)
+                if cat_from_ledger:
+                    tx["categories"] = [{"label": cat_from_ledger, "weight": "1.0",
+                                         "id": 0, "analytical_code": "",
+                                         "category_group": {"id": 0}}]
+                    enriched += 1
+            if enriched:
+                log.info(f"  {enriched} tx enrichies depuis ledger_entries")
+    except Exception as e:
+        log.warning(f"  enrichissement ledger_entries échoué: {e}")
 
     # ── 4. Normalisation + upsert Supabase ────────────────────────────────
     rows = [r for r in (normalize_transaction(tx) for tx in transactions) if r]

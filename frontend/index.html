@@ -364,13 +364,17 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
           ↓ Export CSV<span id="pl-export-count"></span>
         </button>
         <div class="tabs">
+          <button class="tab active" id="tab-ht"  onclick="switchHtTtc(true,this)"  title="Montants hors taxe">HT</button>
+          <button class="tab"        id="tab-ttc" onclick="switchHtTtc(false,this)" title="Montants toutes taxes comprises">TTC</button>
+        </div>
+        <div class="tabs">
           <button class="tab active" id="tab-month" onclick="switchPL('month',this)">Mois</button>
           <button class="tab" id="tab-ytd" onclick="switchPL('ytd',this)">YTD</button>
         </div>
       </div>
     </div>
     <table class="pl-table" id="pl-table">
-      <thead><tr><th style="width:45%">Poste</th><th>Réalisé</th><th>% CA</th></tr></thead>
+      <thead><tr><th style="width:45%">Poste</th><th id="pl-col-header">Réalisé HT</th><th>% CA</th></tr></thead>
       <tbody id="pl-body"></tbody>
     </table>
   </div>
@@ -661,6 +665,7 @@ const API = window.location.port === '8080' || window.location.port === ''
 let state = {
   month:   currentMonth(),
   ytd:     false,
+  showHt:  true,   // true = HT (défaut), false = TTC
   kpis:    null,
   pl:      null,
   evol:    null,
@@ -1163,9 +1168,11 @@ const MC_LABELS      = { 2:'MC1 — Marge Contribution 1', 3:'MC2 — Marge Cont
 function renderPL(plData, kpis) {
   if (!plData || !plData.length || !kpis) return;
 
-  const ca = kpis.ca_ht || 1;
-  const mcs = { 2: kpis.mc1, 3: kpis.mc2, 4: kpis.marge_brute, 5: kpis.ebitda };
-  const mcPcts = { 2: kpis.mc1_pct, 3: kpis.mc2_pct, 4: kpis.marge_brute_pct, 5: kpis.ebitda_pct };
+  // HT ou TTC selon toggle (state.showHt = true par défaut)
+  const showHt = state.showHt !== false;
+  const getAmt = r => showHt
+    ? (r.amount_ht != null ? r.amount_ht : r.amount)
+    : r.amount;
 
   // Séparer les lignes spéciales hors P&L
   const uncategRev = plData.find(r => r.axe3_analytics === '_uncategorized_revenue')
@@ -1183,26 +1190,42 @@ function renderPL(plData, kpis) {
     bySection[s].push(row);
   }
 
+  // Calculer CA et totaux section depuis les données affichées (HT ou TTC)
+  const caRows    = (bySection[1] || []).filter(r => r.is_revenue);
+  const ca        = caRows.reduce((s,r) => s + getAmt(r), 0) || 1;
+  const secTotals = {};
+  for (const s of [2,3,4,5]) {
+    secTotals[s] = (bySection[s] || []).filter(r => !r.is_revenue).reduce((sum,r) => sum + Math.abs(getAmt(r)), 0);
+  }
+  const mc1        = ca - secTotals[2];
+  const mc2        = mc1 - secTotals[3];
+  const margeBrute = mc2 - secTotals[4];
+  const ebitda     = margeBrute - secTotals[5];
+  const mcs        = { 2: mc1, 3: mc2, 4: margeBrute, 5: ebitda };
+  const mcPcts     = { 2: ca ? mc1/ca*100 : null, 3: ca ? mc2/ca*100 : null,
+                       4: ca ? margeBrute/ca*100 : null, 5: ca ? ebitda/ca*100 : null };
+
   let html = '';
   for (const s of [1,2,3,4,5]) {
     const rows = bySection[s] || [];
     if (!rows.length) continue;
 
     html += `<tr class="section-header"><td colspan="3">${SECTION_LABELS[s]}</td></tr>`;
-    for (const r of rows.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))) {
-      const pct = fmt(Math.abs(r.amount)/ca*100, 1);
+    for (const r of rows.sort((a,b)=>Math.abs(getAmt(b))-Math.abs(getAmt(a)))) {
+      const amt = getAmt(r);
+      const pct = fmt(Math.abs(amt)/ca*100, 1);
       const cls = r.is_revenue ? 'positive' : '';
       const posteAttr = JSON.stringify(r.poste_budgetaire).replace(/"/g, '&quot;');
       html += `<tr class="pl-row" onclick="openPlLineModal(${posteAttr}, ${!!r.is_revenue})">
         <td>${r.poste_budgetaire}</td>
-        <td class="${cls}">${r.is_revenue ? '' : '— '}${fmtEur(Math.abs(r.amount))}</td>
+        <td class="${cls}">${r.is_revenue ? '' : '— '}${fmtEur(Math.abs(amt))}</td>
         <td>${pct}%</td>
       </tr>`;
     }
 
     if (s > 1 && mcs[s] !== undefined) {
       const TOTAL_LABELS = { 2:'Total Coûts Acquisition', 3:'Total Sales & Closing', 4:'Total Opérationnel', 5:'Total Structure' };
-      const sectionTotal = rows.filter(r => !r.is_revenue).reduce((sum,r) => sum + Math.abs(r.amount), 0);
+      const sectionTotal = secTotals[s];
       const isEbitda = s === 5;
       if (sectionTotal > 0) {
         const lbl = JSON.stringify(TOTAL_LABELS[s]).replace(/"/g,'&quot;');
@@ -1214,11 +1237,12 @@ function renderPL(plData, kpis) {
       }
       // Bandeau dépenses non catégorisées — entre Total Structure et EBITDA
       if (isEbitda && uncategExp && uncategExp.amount > 0) {
+        const uncAmt = getAmt(uncategExp);
         html += `<tr class="uncateg-exp-row" onclick="openUncategorizedModal('expenses')">
           <td>⚠ <strong style="color:#f59e0b">Dépenses non catégorisées</strong>
               <span style="font-size:10px;color:#64748b;font-weight:400;margin-left:6px">${uncategExp.tx_count} tx · hors P&L · cliquer pour détail</span></td>
-          <td style="color:#f59e0b;font-weight:600">— ${fmtEur(uncategExp.amount)}</td>
-          <td style="color:#64748b">${fmt(uncategExp.amount/ca*100,1)}%</td>
+          <td style="color:#f59e0b;font-weight:600">— ${fmtEur(uncAmt)}</td>
+          <td style="color:#64748b">${fmt(uncAmt/ca*100,1)}%</td>
         </tr>`;
       }
       // Ligne marge / EBITDA
@@ -1230,23 +1254,25 @@ function renderPL(plData, kpis) {
         <td class="${cls}">${fmtPct(mcPcts[s])}</td>
       </tr>`;
     } else if (s === 1) {
-      html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(1, 'TOTAL CA HT', true)">
-        <td>TOTAL CA HT</td><td class="positive">${fmtEur(kpis.ca_ht)}</td><td>100%</td>
+      const caLabel = showHt ? 'TOTAL CA HT' : 'TOTAL CA TTC';
+      html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(1, '${caLabel}', true)">
+        <td>${caLabel}</td><td class="positive">${fmtEur(ca)}</td><td>100%</td>
       </tr>`;
 
       // ── Ligne Remboursements / Avoirs ──
       const remb      = state.avoirs?.remboursements_encaisses;
       const rembTotal = remb?.total || 0;
       if (rembTotal > 0) {
-        const rembPct = fmt(rembTotal / ca * 100, 1);
+        const rembDisplay = showHt ? rembTotal / 1.20 : rembTotal;
+        const rembPct = fmt(rembDisplay / ca * 100, 1);
         html += `<tr class="pl-row" onclick="openAvoirsModal()" style="cursor:pointer">
           <td style="color:#f87171">↩ Remboursements clients
             <span style="font-size:10px;color:#64748b;margin-left:6px">${remb.count} remb. · cliquer pour détail</span>
           </td>
-          <td style="color:#f87171;font-weight:600">— ${fmtEur(rembTotal)}</td>
+          <td style="color:#f87171;font-weight:600">— ${fmtEur(rembDisplay)}</td>
           <td style="color:#64748b">${rembPct}%</td>
         </tr>`;
-        const caNet = kpis.ca_ht - rembTotal;
+        const caNet = ca - rembDisplay;
         html += `<tr class="subtotal">
           <td style="color:#94a3b8">CA Net de remboursements</td>
           <td class="${caNet >= 0 ? 'positive' : 'negative'}" style="font-weight:700">${fmtEur(caNet)}</td>
@@ -1256,14 +1282,15 @@ function renderPL(plData, kpis) {
 
       // Encaissements non catégorisés — après TOTAL CA HT
       if (uncategRev && uncategRev.amount > 0) {
+        const uncRevAmt = getAmt(uncategRev);
         html += `<tr class="uncateg-row" onclick="openUncategorizedModal('revenue')">
           <td>⚠ Encaissements non catégorisés
               <span style="font-size:10px;color:#64748b;font-style:normal;margin-left:6px">${uncategRev.tx_count} tx · hors P&L · cliquer pour détail</span></td>
-          <td style="color:#f59e0b">${fmtEur(uncategRev.amount)}</td>
-          <td style="color:#64748b">${fmt(uncategRev.amount/ca*100,1)}%</td>
+          <td style="color:#f59e0b">${fmtEur(uncRevAmt)}</td>
+          <td style="color:#64748b">${fmt(uncRevAmt/ca*100,1)}%</td>
         </tr>`;
         // Ligne CA total potentiel
-        const caTotal = kpis.ca_ht + uncategRev.amount;
+        const caTotal = ca + uncRevAmt;
         html += `<tr class="ca-total-row">
           <td>↳ CA total potentiel (catégorisé + non catégorisé)</td>
           <td class="positive">${fmtEur(caTotal)}</td>
@@ -1410,9 +1437,20 @@ function onComboChange(val) {
   fetchAll();
 }
 
+function switchHtTtc(showHt, btn) {
+  // Toggle HT / TTC — ne recharge pas les données, juste re-render
+  state.showHt = showHt;
+  document.getElementById('tab-ht').classList.toggle('active',  showHt);
+  document.getElementById('tab-ttc').classList.toggle('active', !showHt);
+  const colHeader = document.getElementById('pl-col-header');
+  if (colHeader) colHeader.textContent = showHt ? 'Réalisé HT' : 'Réalisé TTC';
+  if (state.pl && state.kpis) renderPL(state.pl, state.kpis);
+}
+
 function switchPL(mode, btn) {
-  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
+  // Ne pas toucher aux boutons HT/TTC lors du switch Mois/YTD
+  document.getElementById('tab-month').classList.toggle('active', mode !== 'ytd');
+  document.getElementById('tab-ytd').classList.toggle('active',   mode === 'ytd');
   const today = new Date();
   const year  = today.getFullYear();
   if (mode === 'ytd') {

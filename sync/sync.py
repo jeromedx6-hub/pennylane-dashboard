@@ -22,7 +22,7 @@ BASE_URL         = "https://app.pennylane.com/api/external/v2"
 
 # ── Version du moteur de sync ──────────────────────────────────────────────
 # Incrémenter à chaque deploy significatif pour traçabilité dans le dashboard
-SYNC_VERSION = "2026.06.02-1"
+SYNC_VERSION = "2026.06.03-tva"
 
 # IDs familles Pennylane à ignorer pour le P&L (trésorerie / technique)
 # L'API ne retourne PAS le label dans category_group, uniquement l'id numérique
@@ -147,8 +147,10 @@ def pl_get_modified_since(token, since_dt):
 
 # ── Normalisation ──────────────────────────────────────────────────────────
 
-def normalize_transaction(tx):
-    """Convertit une transaction Pennylane en ligne Supabase (champs étendus)."""
+def normalize_transaction(tx, mapping=None):
+    """Convertit une transaction Pennylane en ligne Supabase (champs étendus).
+    mapping : dict category_name → row (optionnel, pour calculer amount_ht).
+    """
     amount    = float(tx.get("currency_amount") or tx.get("amount") or 0)
     direction = "credit" if amount >= 0 else "debit"
 
@@ -169,6 +171,14 @@ def normalize_transaction(tx):
         category_id   = ""
         family_id     = ""
 
+    # Montant HT : amount TTC / (1 + tva_rate)
+    if mapping and category_name and category_name in mapping:
+        tva_rate = float(mapping[category_name].get("tva_rate") or 0.20)
+    else:
+        tva_rate = 0.20   # défaut si catégorie inconnue
+    amount_abs = abs(amount)
+    amount_ht  = round(amount_abs / (1 + tva_rate), 2) if tva_rate > 0 else amount_abs
+
     # Tiers (client ou fournisseur si disponible)
     third_party      = tx.get("customer") or tx.get("supplier") or {}
     third_party_name = third_party.get("name", "") if isinstance(third_party, dict) else ""
@@ -177,7 +187,8 @@ def normalize_transaction(tx):
         "id":            f"tx_{tx['id']}",
         "date":          tx["date"],
         "label":         tx.get("label") or "",
-        "amount":        abs(amount),
+        "amount":        amount_abs,
+        "amount_ht":     amount_ht,
         "direction":     direction,
         "currency":      tx.get("currency", "EUR"),
         "category_name": category_name,
@@ -230,6 +241,7 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
                     "axe3_analytics":   "_divers_revenue",
                     "pl_section":       1,
                     "is_revenue":       True,
+                    "tva_rate":         0.20,
                 }
             else:
                 divers_key = "__divers_expenses__"
@@ -239,6 +251,7 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
                     "axe3_analytics":   "_divers_expenses",
                     "pl_section":       5,
                     "is_revenue":       False,
+                    "tva_rate":         0.20,
                 }
             key = divers_key
             if key not in aggregated:
@@ -250,11 +263,15 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
                     "pl_section":       m["pl_section"],
                     "is_revenue":       m["is_revenue"],
                     "amount":           0.0,
+                    "amount_ht":        0.0,
                     "tx_count":         0,
                 }
             sign = 1 if is_credit else -1
-            aggregated[key]["amount"]   += sign * float(tx["amount"] or 0)
-            aggregated[key]["tx_count"] += 1
+            tx_amt    = float(tx["amount"] or 0)
+            tx_amt_ht = float(tx.get("amount_ht") or tx_amt)
+            aggregated[key]["amount"]    += sign * tx_amt
+            aggregated[key]["amount_ht"] += sign * tx_amt_ht
+            aggregated[key]["tx_count"]  += 1
             continue
 
         key = m["poste_budgetaire"]
@@ -267,11 +284,15 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
                 "pl_section":       m.get("pl_section"),
                 "is_revenue":       m.get("is_revenue", False),
                 "amount":           0.0,
+                "amount_ht":        0.0,
                 "tx_count":         0,
             }
-        sign = 1 if tx["direction"] == "credit" else -1
-        aggregated[key]["amount"]   += sign * float(tx["amount"] or 0)
-        aggregated[key]["tx_count"] += 1
+        sign      = 1 if tx["direction"] == "credit" else -1
+        tx_amt    = float(tx["amount"] or 0)
+        tx_amt_ht = float(tx.get("amount_ht") or tx_amt)
+        aggregated[key]["amount"]    += sign * tx_amt
+        aggregated[key]["amount_ht"] += sign * tx_amt_ht
+        aggregated[key]["tx_count"]  += 1
 
     # DELETE + INSERT (pas upsert) pour supprimer les postes qui n'ont
     # plus de transactions (ex : tx supprimée dans Pennylane depuis le dernier sync)
@@ -285,16 +306,19 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
 
 def compute_kpis(sb, target_date):
     date_str = target_date.isoformat()
-    rows = sb.table("pl_daily").select("pl_section,is_revenue,amount,axe3_analytics").eq("date", date_str).execute().data
+    rows = sb.table("pl_daily").select("pl_section,is_revenue,amount,amount_ht,axe3_analytics").eq("date", date_str).execute().data
 
     totals = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
     total_pub = 0.0
     for r in rows:
         s = r.get("pl_section")
         if s:
-            totals[s] += float(r["amount"] or 0)
+            # Utiliser amount_ht si disponible, sinon amount (TTC en fallback)
+            val = float(r.get("amount_ht") or r["amount"] or 0)
+            totals[s] += val
         if r.get("axe3_analytics") in ("Pub_Meta", "Pub_Event", "Affiliés"):
-            total_pub += abs(float(r["amount"] or 0))
+            val_ht = float(r.get("amount_ht") or r["amount"] or 0)
+            total_pub += abs(val_ht)
 
     ca              = totals[1]
     total_acq       = abs(totals[2])
@@ -442,7 +466,7 @@ def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
             day_pl     = [tx for tx in pl_txs if tx["date"] == d]
             day_pl_ids = {f"tx_{tx['id']}" for tx in day_pl}
 
-            normalized = [r for r in (normalize_transaction(tx) for tx in day_pl) if r]
+            normalized = [r for r in (normalize_transaction(tx, mapping) for tx in day_pl) if r]
             if normalized:
                 sb.table("transactions").upsert(normalized, on_conflict="id").execute()
 
@@ -464,7 +488,7 @@ def verify_sync(token, sb, date_from, date_to, pl_transactions=None):
             src_id  = tid.replace("tx_", "")
             day_pl  = [tx for tx in pl_txs if str(tx["id"]) == src_id]
             if day_pl:
-                normalized = [r for r in (normalize_transaction(tx) for tx in day_pl) if r]
+                normalized = [r for r in (normalize_transaction(tx, mapping) for tx in day_pl) if r]
                 if normalized:
                     sb.table("transactions").upsert(normalized, on_conflict="id").execute()
             auto_fixed_dates.add(change["date"])
@@ -774,7 +798,7 @@ def run(date_from=None, date_to=None):
         log.warning(f"  enrichissement ledger_entries échoué: {e}")
 
     # ── 4. Normalisation + upsert Supabase ────────────────────────────────
-    rows = [r for r in (normalize_transaction(tx) for tx in transactions) if r]
+    rows = [r for r in (normalize_transaction(tx, mapping) for tx in transactions) if r]
     if rows:
         sb.table("transactions").upsert(rows, on_conflict="id").execute()
         log.info(f"  {len(rows)} transactions upsertées dans Supabase")

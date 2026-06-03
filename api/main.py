@@ -275,7 +275,7 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
 
     rows = (
         sb.table("pl_daily")
-        .select("poste_budgetaire, axe2_pole, axe3_analytics, pl_section, is_revenue, amount, tx_count")
+        .select("poste_budgetaire, axe2_pole, axe3_analytics, pl_section, is_revenue, amount, amount_ht, tx_count")
         .gte("date", d_from)
         .lte("date", d_to)
         .execute()
@@ -293,10 +293,12 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
                 "pl_section":       r["pl_section"],
                 "is_revenue":       r["is_revenue"],
                 "amount":           0,
+                "amount_ht":        0,
                 "tx_count":         0,
             }
-        aggregated[key]["amount"]   += float(r["amount"] or 0)
-        aggregated[key]["tx_count"] += int(r["tx_count"] or 0)
+        aggregated[key]["amount"]    += float(r["amount"] or 0)
+        aggregated[key]["amount_ht"] += float(r.get("amount_ht") or r["amount"] or 0)
+        aggregated[key]["tx_count"]  += int(r["tx_count"] or 0)
 
     # ── Encaissements non catégorisés (crédits category='Revenu', hors P&L CA) ──
     unc_rev_total, unc_rev_count = 0.0, 0
@@ -323,6 +325,7 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
             "pl_section":       1,
             "is_revenue":       True,
             "amount":           round(unc_rev_total, 2),
+            "amount_ht":        round(unc_rev_total / 1.20, 2),
             "tx_count":         unc_rev_count,
         }
 
@@ -351,6 +354,7 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
             "pl_section":       5,
             "is_revenue":       False,
             "amount":           round(unc_exp_total, 2),
+            "amount_ht":        round(unc_exp_total / 1.20, 2),
             "tx_count":         unc_exp_count,
         }
 

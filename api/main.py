@@ -1032,38 +1032,55 @@ def recompute_pl(date_from: str = Query(default=None), date_to: str = Query(defa
 def backfill_ht():
     """
     Recalcule amount_ht pour toutes les transactions existantes en base
-    depuis category_mapping.tva_rate. À lancer une seule fois après ajout TVA.
+    depuis category_mapping.tva_rate.
+    Groupe par valeur amount_ht exacte et fait un PATCH par groupe (rapide).
     """
     try:
-        mapping = {r["pennylane_category_name"]: r
-                   for r in sb.table("category_mapping").select("*").execute().data}
+        import requests as _req
+        from collections import defaultdict
 
-        # Lire toutes les transactions par pages
-        updated, page, size = 0, 0, 1000
+        mapping = {r["pennylane_category_name"]: float(r.get("tva_rate") or 0.20)
+                   for r in sb.table("category_mapping").select("pennylane_category_name,tva_rate").execute().data}
+
+        # Fetch toutes les transactions
+        all_txs, page, size = [], 0, 1000
         while True:
-            batch = (sb.table("transactions")
-                     .select("id,amount,category_name")
-                     .range(page * size, (page + 1) * size - 1)
-                     .execute().data)
-            if not batch:
-                break
-            rows_to_update = []
-            for tx in batch:
-                cat = tx.get("category_name") or ""
-                m   = mapping.get(cat, {})
-                tva_rate = float(m.get("tva_rate") or 0.20)
-                amt_abs  = abs(float(tx.get("amount") or 0))
-                amt_ht   = round(amt_abs / (1 + tva_rate), 2) if tva_rate > 0 else amt_abs
-                rows_to_update.append({"id": tx["id"], "amount_ht": amt_ht})
-            if rows_to_update:
-                sb.table("transactions").upsert(rows_to_update, on_conflict="id").execute()
-                updated += len(rows_to_update)
+            batch = (sb.table("transactions").select("id,amount,category_name")
+                     .range(page * size, (page + 1) * size - 1).execute().data)
+            all_txs.extend(batch)
             if len(batch) < size:
                 break
             page += 1
 
+        # Grouper par amount_ht exact (évite N requêtes individuelles)
+        ht_to_ids: dict = defaultdict(list)
+        for tx in all_txs:
+            cat  = tx.get("category_name") or ""
+            rate = mapping.get(cat, 0.20)
+            amt  = abs(float(tx.get("amount") or 0))
+            ht   = round(amt / (1 + rate), 2) if rate > 0 else amt
+            ht_to_ids[ht].append(tx["id"])
+
+        supa_url = os.environ["SUPABASE_URL"]
+        supa_key = os.environ["SUPABASE_KEY"]
+        patch_headers = {
+            "apikey": supa_key, "Authorization": f"Bearer {supa_key}",
+            "Content-Type": "application/json", "Prefer": "return=minimal"
+        }
+
+        updated = 0
+        for ht_val, ids in ht_to_ids.items():
+            ids_csv = ",".join(ids)
+            r = _req.patch(
+                f"{supa_url}/rest/v1/transactions?id=in.({ids_csv})",
+                headers=patch_headers,
+                json={"amount_ht": ht_val}
+            )
+            if r.status_code in (200, 204):
+                updated += len(ids)
+
         logging.info(f"backfill_ht: {updated} transactions mises à jour")
-        return {"status": "ok", "transactions_updated": updated}
+        return {"status": "ok", "transactions_updated": updated, "total": len(all_txs)}
     except Exception as e:
         logging.error(f"backfill_ht: {e}")
         return {"status": "error", "detail": str(e)}

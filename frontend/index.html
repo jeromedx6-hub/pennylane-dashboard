@@ -2534,24 +2534,49 @@ function renderRev30(data) {
   if (sub)  sub.textContent  = `${periodTxt} · Source Pennylane`;
   if (csub) csub.textContent = periodTxt;
 
-  // 4 KPI Cards
+  // 4 KPI Cards avec comparaison référence
+  const ref  = data.ref || {};
+  const refLbl = ref.label || '';
+
+  function _delta(val, refVal, invert = false) {
+    if (!refVal) return '';
+    const diff = val - refVal;
+    const pct  = Math.round(diff / refVal * 100);
+    const up   = diff >= 0;
+    const good = invert ? !up : up;   // invert=true → hausse = mauvais (ex: remboursements)
+    const color = good ? '#4ade80' : '#f87171';
+    const arrow = up ? '▲' : '▼';
+    const sign  = up ? '+' : '';
+    return `<span style="color:${color};font-size:11px;font-weight:600">${arrow} ${sign}${pct}%</span>
+            <span style="color:#64748b;font-size:10px"> vs ${refLbl}</span>`;
+  }
+
   grid.innerHTML = `
     <div class="kpi-card green">
       <div class="kpi-label">CA Encaissé</div>
       <div class="kpi-value" style="font-size:22px">${fmtEur(k.ca_total)}</div>
-      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">30 jours glissants</span></div>
+      <div class="kpi-deltas" style="display:flex;flex-direction:column;gap:2px">
+        <span style="font-size:10px;color:#64748b">${ref.ca_total ? fmtEur(ref.ca_total)+' réf.' : ''}</span>
+        ${_delta(k.ca_total, ref.ca_total)}
+      </div>
     </div>
     <div class="kpi-card red">
       <div class="kpi-label">Remboursements</div>
       <div class="kpi-value" style="font-size:22px;color:${k.remboursements>0?'#f87171':'#e2e8f0'}">
         ${k.remboursements>0?'- ':''}${fmtEur(k.remboursements)}
       </div>
-      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">débits catégories revenus</span></div>
+      <div class="kpi-deltas" style="display:flex;flex-direction:column;gap:2px">
+        <span style="font-size:10px;color:#64748b">${ref.remboursements ? fmtEur(ref.remboursements)+' réf.' : ''}</span>
+        ${_delta(k.remboursements, ref.remboursements, true)}
+      </div>
     </div>
     <div class="kpi-card blue">
       <div class="kpi-label">Panier Moyen</div>
       <div class="kpi-value" style="font-size:22px">${fmtEur(k.panier_moyen)}</div>
-      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">par transaction revenu</span></div>
+      <div class="kpi-deltas" style="display:flex;flex-direction:column;gap:2px">
+        <span style="font-size:10px;color:#64748b">${ref.panier_moyen ? fmtEur(ref.panier_moyen)+' réf.' : ''}</span>
+        ${_delta(k.panier_moyen, ref.panier_moyen)}
+      </div>
     </div>
     <div class="kpi-card orange">
       <div class="kpi-label">Transactions Non Traitées</div>

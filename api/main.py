@@ -1533,6 +1533,71 @@ def get_revenue_30d(month: str = Query(default=None)):
     panier_moyen = total_ca / rev_tx_count if rev_tx_count > 0 else 0.0
     daily_series = [{"date": d, "ca": round(daily_map.get(d, 0.0), 2)} for d in day_range]
 
+    # ── Référence 90 jours antérieurs ──────────────────────────────
+    # Mode mois : 3 mois précédents complets
+    # Mode 30j glissants : les 90 jours qui précèdent d_from
+    if month:
+        # 3 mois précédents → on ramène un total "même durée" = moyenne mensuelle × 1
+        ref_months = []
+        y_r, m_r = int(month[:4]), int(month[5:7])
+        for delta in [1, 2, 3]:
+            pm = m_r - delta
+            py = y_r
+            while pm <= 0:
+                pm += 12; py -= 1
+            ref_months.append(f"{py:04d}-{pm:02d}")
+        ref_ca_list = []
+        ref_rmb_list = []
+        ref_panier_list = []
+        for rm in ref_months:
+            rf, rt = _month_range(rm)
+            rrows = sb.table("kpis_daily").select("ca_ht").gte("date", rf).lte("date", rt).execute().data
+            rc = sum(float(r["ca_ht"] or 0) for r in rrows)
+            ref_ca_list.append(rc)
+            # remboursements + panier sur ce mois
+            rtx_page, rtxs = 0, []
+            while True:
+                b = (sb.table("transactions").select("amount,direction,category_name")
+                     .gte("date", rf).lte("date", rt)
+                     .range(rtx_page*1000,(rtx_page+1)*1000-1).execute().data)
+                rtxs.extend(b); rtx_page += 1
+                if len(b) < 1000: break
+            rrmb, rcnt = 0.0, 0
+            for tx in rtxs:
+                cat = tx.get("category_name") or ""
+                amt = float(tx.get("amount") or 0)
+                if tx.get("direction") == "debit" and cat in cat_set: rrmb += amt
+                if tx.get("direction") == "credit" and cat in cat_set: rcnt += 1
+            ref_rmb_list.append(rrmb)
+            ref_panier_list.append(rc / rcnt if rcnt > 0 else 0.0)
+        ref_ca      = round(sum(ref_ca_list) / 3, 2)      # moyenne mensuelle
+        ref_rmb     = round(sum(ref_rmb_list) / 3, 2)
+        ref_panier  = round(sum(ref_panier_list) / 3, 2)
+        ref_label   = f"moy. {ref_months[2][5:7]}-{ref_months[0][5:7]}/{ref_months[0][:4]}"
+    else:
+        # 90 jours glissants avant d_from
+        ref_to   = (date.fromisoformat(d_from) - timedelta(days=1)).isoformat()
+        ref_from = (date.fromisoformat(d_from) - timedelta(days=90)).isoformat()
+        rrows    = sb.table("kpis_daily").select("ca_ht").gte("date", ref_from).lte("date", ref_to).execute().data
+        ref_ca_90 = sum(float(r["ca_ht"] or 0) for r in rrows)
+        ref_ca   = round(ref_ca_90 / 3, 2)   # ramené à 30j pour comparaison
+        rtx_page, rtxs = 0, []
+        while True:
+            b = (sb.table("transactions").select("amount,direction,category_name")
+                 .gte("date", ref_from).lte("date", ref_to)
+                 .range(rtx_page*1000,(rtx_page+1)*1000-1).execute().data)
+            rtxs.extend(b); rtx_page += 1
+            if len(b) < 1000: break
+        rrmb, rcnt = 0.0, 0
+        for tx in rtxs:
+            cat = tx.get("category_name") or ""
+            amt = float(tx.get("amount") or 0)
+            if tx.get("direction") == "debit" and cat in cat_set: rrmb += amt
+            if tx.get("direction") == "credit" and cat in cat_set: rcnt += 1
+        ref_rmb    = round(rrmb / 3, 2)
+        ref_panier = round((ref_ca_90 / 3) / (rcnt / 3) if rcnt > 0 else 0.0, 2)
+        ref_label  = "moy. 90j précédents"
+
     return {
         "period": {"from": d_from, "to": d_to},
         "kpis": {
@@ -1540,6 +1605,12 @@ def get_revenue_30d(month: str = Query(default=None)):
             "remboursements":  round(total_refunds, 2),
             "panier_moyen":    round(panier_moyen, 2),
             "tx_non_traitees": untreated,
+        },
+        "ref": {
+            "ca_total":       ref_ca,
+            "remboursements": ref_rmb,
+            "panier_moyen":   ref_panier,
+            "label":          ref_label,
         },
         "daily": daily_series,
     }

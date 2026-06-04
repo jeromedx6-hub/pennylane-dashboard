@@ -1545,6 +1545,43 @@ def get_revenue_30d(month: str = Query(default=None)):
     }
 
 
+@app.get("/api/revenue_avg3m")
+def get_revenue_avg3m(month: str = Query(default=None)):
+    """
+    Retourne la moyenne journalière de CA sur les 3 mois précédant `month` (ou mois courant).
+    Format : {"avg_by_day": {"01": 3200.0, "02": 2100.0, ...}, "monthly_avg": 180000.0}
+    """
+    today = date.today()
+    if month:
+        y, m_int = int(month[:4]), int(month[5:7])
+    else:
+        y, m_int = today.year, today.month
+
+    # 3 mois précédents
+    months_data = {}
+    for delta in [1, 2, 3]:
+        pm = m_int - delta
+        py = y
+        while pm <= 0:
+            pm += 12
+            py -= 1
+        d_from, d_to = _month_range(f"{py:04d}-{pm:02d}")
+        rows = (
+            sb.table("kpis_daily")
+            .select("date,ca_ht")
+            .gte("date", d_from)
+            .lte("date", d_to)
+            .execute().data
+        )
+        for r in rows:
+            day_num = r["date"][8:10]  # "01" .. "31"
+            months_data.setdefault(day_num, []).append(float(r["ca_ht"] or 0))
+
+    avg_by_day = {day: round(sum(vals) / len(vals), 2) for day, vals in months_data.items()}
+    monthly_avg = round(sum(avg_by_day.values()), 2)
+    return {"avg_by_day": avg_by_day, "monthly_avg": monthly_avg}
+
+
 @app.get("/api/release_notes")
 def get_release_notes(limit: int = Query(default=50, le=100)):
     """Historique des mises à jour du superviseur (changelog automatique)."""

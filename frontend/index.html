@@ -425,6 +425,12 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
         <div class="card-title">CA encaissé · Jour par jour</div>
         <div class="card-sub" id="rev30-chart-sub">—</div>
       </div>
+      <button id="btn-avg3m" onclick="toggleAvg3m()" style="
+        background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);
+        color:#a5b4fc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;
+        transition:all .2s;white-space:nowrap">
+        ∼ Moy. 3 mois
+      </button>
     </div>
     <div style="position:relative;height:300px;padding-bottom:8px">
       <canvas id="chart-rev30"></canvas>
@@ -2489,6 +2495,10 @@ function setRev30Mode(mode, btn) {
 }
 
 async function fetchRev30() {
+  // Reset cache moy 3 mois à chaque changement de période
+  _avg3mData = null;
+  const sub = document.getElementById('rev30-chart-sub');
+  if (sub && sub._prev) { sub.textContent = sub._prev; sub._prev = null; }
   initRev30();
   const sel = document.getElementById('rev30-month-select');
   const url = (rev30Mode === 'month' && sel?.value)
@@ -2504,9 +2514,10 @@ async function fetchRev30() {
   }
 }
 
-function renderRev30() {
-  const data = rev30Data;
+function renderRev30(data) {
+  if (!data) data = rev30Data;
   if (!data) return;
+  window._lastRev30Data = data;
 
   const k    = data.kpis;
   const grid = document.getElementById('rev30-grid');
@@ -2559,27 +2570,55 @@ function renderRev30() {
   const colors = values.map(v => v > 0 ? 'rgba(99,102,241,0.75)' : 'rgba(248,113,113,0.5)');
   const borders = values.map(v => v > 0 ? '#6366f1' : '#f87171');
 
+  // Ligne moyenne 3 mois si active
+  const avgData = _avg3mActive && _avg3mData
+    ? data.daily.map(d => {
+        const dayNum = d.date.slice(8, 10); // "07"
+        return _avg3mData.avg_by_day[dayNum] ?? null;
+      })
+    : null;
+
   const ctx = document.getElementById('chart-rev30')?.getContext('2d');
   if (!ctx) return;
   if (chartRev30) chartRev30.destroy();
+
+  const datasets = [{
+    label: 'CA encaissé',
+    data: values,
+    backgroundColor: colors,
+    borderColor: borders,
+    borderWidth: 1,
+    borderRadius: 3,
+    order: 2,
+  }];
+
+  if (avgData) {
+    datasets.push({
+      label: 'Moy. 3 mois',
+      data: avgData,
+      type: 'line',
+      borderColor: 'rgba(251,191,36,0.85)',
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      borderDash: [5, 4],
+      pointRadius: 3,
+      pointBackgroundColor: 'rgba(251,191,36,0.85)',
+      tension: 0.3,
+      order: 1,
+    });
+  }
+
   chartRev30 = new Chart(ctx, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        label: 'CA encaissé',
-        data: values,
-        backgroundColor: colors,
-        borderColor: borders,
-        borderWidth: 1,
-        borderRadius: 3,
-      }]
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: !!avgData,
+          labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 20 }
+        },
         datalabels: { display: false },
         tooltip: {
           callbacks: {
@@ -2587,7 +2626,14 @@ function renderRev30() {
               const d = data.daily[items[0].dataIndex];
               return new Date(d.date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
             },
-            label: item => `CA : ${fmtEur(item.raw)}`
+            label: item => {
+              if (item.dataset.label === 'Moy. 3 mois') return `Moy. 3 mois : ${fmtEur(item.raw)}`;
+              const diff = avgData ? item.raw - (avgData[item.dataIndex] ?? 0) : null;
+              const sign = diff >= 0 ? '+' : '';
+              return diff !== null
+                ? [`CA : ${fmtEur(item.raw)}`, `vs moy. : ${sign}${fmtEur(diff)}`]
+                : `CA : ${fmtEur(item.raw)}`;
+            }
           }
         }
       },
@@ -2608,6 +2654,52 @@ function renderRev30() {
       }
     }
   });
+}
+
+// ── Moyenne 3 mois ────────────────────────────────────────────
+let _avg3mActive = false;
+let _avg3mData   = null;
+
+async function toggleAvg3m() {
+  const btn = document.getElementById('btn-avg3m');
+  _avg3mActive = !_avg3mActive;
+
+  if (_avg3mActive) {
+    btn.style.background = 'rgba(251,191,36,0.2)';
+    btn.style.borderColor = 'rgba(251,191,36,0.6)';
+    btn.style.color = '#fbbf24';
+    btn.textContent = '✕ Moy. 3 mois';
+
+    if (!_avg3mData) {
+      btn.textContent = '⟳ Chargement…';
+      const selEl = document.getElementById('rev30-month-select');
+      const month = (rev30Mode === 'month' && selEl?.value) ? selEl.value : null;
+      const url = month ? `/api/revenue_avg3m?month=${month}` : '/api/revenue_avg3m';
+      try {
+        const r = await fetch(url);
+        _avg3mData = await r.json();
+        // Afficher la moyenne mensuelle dans le sous-titre
+        const sub = document.getElementById('rev30-chart-sub');
+        if (sub && _avg3mData.monthly_avg) {
+          const prev = sub.textContent;
+          sub._prev = prev;
+          sub.textContent = prev + ` · Moy. 3 mois : ${fmtEur(_avg3mData.monthly_avg)}`;
+        }
+      } catch(e) { console.error(e); }
+      btn.textContent = '✕ Moy. 3 mois';
+    }
+  } else {
+    btn.style.background = 'rgba(99,102,241,0.15)';
+    btn.style.borderColor = 'rgba(99,102,241,0.3)';
+    btn.style.color = '#a5b4fc';
+    btn.textContent = '∼ Moy. 3 mois';
+    // Restore sous-titre
+    const sub = document.getElementById('rev30-chart-sub');
+    if (sub && sub._prev) { sub.textContent = sub._prev; sub._prev = null; }
+  }
+
+  // Re-render le graphique avec ou sans ligne
+  if (window._lastRev30Data) renderRev30(window._lastRev30Data);
 }
 
 // ── Nouvelles Ventes (sales_events webhook) ────────────────────

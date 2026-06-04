@@ -800,8 +800,50 @@ def run(date_from=None, date_to=None):
     # ── 4. Normalisation + upsert Supabase ────────────────────────────────
     rows = [r for r in (normalize_transaction(tx, mapping) for tx in transactions) if r]
     if rows:
-        sb.table("transactions").upsert(rows, on_conflict="id").execute()
-        log.info(f"  {len(rows)} transactions upsertées dans Supabase")
+        # Protection manually_mapped : si une transaction a été catégorisée manuellement
+        # ET que Pennylane renvoie toujours categories=[], on ne touche pas à la catégorie.
+        # Si Pennylane a enfin une vraie catégorie → on écrase (priorité Pennylane).
+        rows_empty_cat  = [r for r in rows if not r.get("category_name")]
+        rows_with_cat   = [r for r in rows if r.get("category_name")]
+
+        if rows_empty_cat:
+            # Charger les IDs manuellement mappés parmi ceux qu'on va upsert
+            ids_empty = [r["id"] for r in rows_empty_cat]
+            protected = set()
+            # Supabase limite les IN à ~500 — on chunk si besoin
+            chunk_size = 400
+            for i in range(0, len(ids_empty), chunk_size):
+                chunk = ids_empty[i:i + chunk_size]
+                res = (sb.table("transactions")
+                       .select("id")
+                       .in_("id", chunk)
+                       .eq("manually_mapped", True)
+                       .execute().data)
+                protected.update(r["id"] for r in res)
+
+            if protected:
+                log.info(f"  {len(protected)} tx protégées (manually_mapped) — catégorie conservée")
+            # Retirer category_name des rows protégées pour ne pas écraser
+            rows_empty_safe = []
+            for r in rows_empty_cat:
+                if r["id"] in protected:
+                    # On upsert sans toucher category_name ni manually_mapped
+                    r_safe = {k: v for k, v in r.items()
+                              if k not in ("category_name", "category_id", "family_id", "manually_mapped")}
+                    rows_empty_safe.append(r_safe)
+                else:
+                    rows_empty_safe.append(r)
+            rows_to_upsert = rows_with_cat + rows_empty_safe
+        else:
+            rows_to_upsert = rows_with_cat
+
+        # Transactions avec une vraie catégorie Pennylane → reset manually_mapped
+        if rows_with_cat:
+            for r in rows_with_cat:
+                r["manually_mapped"] = False
+
+        sb.table("transactions").upsert(rows_to_upsert, on_conflict="id").execute()
+        log.info(f"  {len(rows_to_upsert)} transactions upsertées dans Supabase")
 
     # ── 5. P&L + KPIs : fenêtre + dates des tx modifiées ─────────────────
     dates_to_compute = set()

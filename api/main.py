@@ -365,9 +365,9 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
 def get_uncategorized_detail(
     month: str = Query(default=None),
     ytd:   bool = Query(default=False),
-    type:  str  = Query(default="revenue"),   # "revenue" | "expenses"
+    type:  str  = Query(default="revenue"),   # "revenue" | "expenses" | "all"
 ):
-    """Détail des transactions non catégorisées (pour modal drill-down + export)."""
+    """Détail des transactions non catégorisées avec suggestions depuis label_category_rules."""
     today = date.today()
     if ytd:
         d_from = f"{today.year}-01-01"
@@ -376,12 +376,25 @@ def get_uncategorized_detail(
         month  = month or today.strftime("%Y-%m")
         d_from, d_to = _month_range(month)
 
+    # Charger les règles de suggestion une fois
+    rules = sb.table("label_category_rules").select("pattern,category_name").execute().data
+    # Charger toutes les catégories disponibles pour le select
+    all_categories = [r["pennylane_category_name"]
+                      for r in sb.table("category_mapping").select("pennylane_category_name").execute().data]
+
+    def _suggest(label: str) -> str:
+        """Retourne la catégorie suggérée si un pattern matche le libellé."""
+        lbl_lower = (label or "").lower()
+        for rule in rules:
+            if rule["pattern"].lower() in lbl_lower:
+                return rule["category_name"]
+        return ""
+
     def _fetch_all(extra_filters: list) -> list:
-        """Paginate a query built with a list of (method, *args) filter calls."""
         out, pg = [], 0
         while True:
             q = (sb.table("transactions")
-                 .select("date,label,amount,direction,category_name,third_party")
+                 .select("id,date,label,amount,direction,category_name,third_party")
                  .gte("date", d_from).lte("date", d_to)
                  .order("date", desc=True))
             for method, *args in extra_filters:
@@ -402,8 +415,80 @@ def get_uncategorized_detail(
         exp  = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "debit")])
         rows = sorted(rev + exp, key=lambda r: r["date"], reverse=True)
 
+    # Enrichir avec suggestion
+    for r in rows:
+        r["suggested_category"] = _suggest(r.get("label", ""))
+
     total = sum(float(r["amount"] or 0) * (1 if r["direction"] == "credit" else -1) for r in rows)
-    return {"type": type, "data": rows, "total": round(total, 2), "count": len(rows)}
+    return {
+        "type":           type,
+        "data":           rows,
+        "total":          round(total, 2),
+        "count":          len(rows),
+        "all_categories": sorted(all_categories),
+    }
+
+
+@app.post("/api/transactions/{tx_id}/approve-category")
+def approve_category(tx_id: str, body: dict):
+    """
+    Valide manuellement une catégorie pour une transaction non catégorisée.
+    - Écrit category_name + manually_mapped=True en Supabase
+    - Ajoute/incrémente la règle dans label_category_rules
+    - Recalcule pl_daily + kpis pour la date concernée
+    """
+    category_name = (body.get("category_name") or "").strip()
+    label         = (body.get("label") or "").strip()
+    tx_date       = (body.get("date") or "").strip()
+
+    if not category_name:
+        return {"status": "error", "detail": "category_name requis"}
+
+    try:
+        # 1. Mettre à jour la transaction
+        sb.table("transactions").update({
+            "category_name":  category_name,
+            "manually_mapped": True,
+        }).eq("id", tx_id).execute()
+
+        # 2. Ajouter/incrémenter la règle de suggestion (pattern = label complet)
+        if label:
+            # Chercher si une règle existe déjà avec ce pattern exact
+            existing = sb.table("label_category_rules").select("id,validated_count").eq("pattern", label).execute().data
+            if existing:
+                sb.table("label_category_rules").update({
+                    "category_name":   category_name,
+                    "validated_count": existing[0]["validated_count"] + 1,
+                }).eq("pattern", label).execute()
+            else:
+                sb.table("label_category_rules").insert({
+                    "pattern":       label,
+                    "category_name": category_name,
+                }).execute()
+
+        # 3. Recalcul pl_daily + kpis pour la date concernée
+        if tx_date:
+            try:
+                import sys, importlib
+                if "sync" in sys.modules:
+                    _sync_mod = importlib.reload(sys.modules["sync"])
+                else:
+                    import sync as _sync_mod
+                mapping = {r["pennylane_category_name"]: r
+                           for r in sb.table("category_mapping").select("*").execute().data}
+                cat_families = {r["label"]: (r.get("family_label") or "")
+                                for r in sb.table("pennylane_categories").select("label,family_label").execute().data}
+                from datetime import date as _date
+                d = _date.fromisoformat(tx_date)
+                _sync_mod.compute_pl_daily(sb, mapping, d, cat_families=cat_families)
+                _sync_mod.compute_kpis(sb, d)
+            except Exception as e:
+                logging.warning(f"  approve_category recompute failed: {e}")
+
+        return {"status": "ok", "tx_id": tx_id, "category_name": category_name}
+    except Exception as e:
+        logging.error(f"approve_category: {e}")
+        return {"status": "error", "detail": str(e)}
 
 
 @app.get("/api/evolution")

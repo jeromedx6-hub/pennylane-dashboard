@@ -106,7 +106,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 .pl-table tr.uncateg-exp-row:hover td { background:rgba(245,158,11,.1); }
 /* Modal uncatégorisé */
 #uncateg-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:9999; align-items:center; justify-content:center; }
-#uncateg-modal .um-box { background:#0f1117; border:1px solid #1e2340; border-radius:12px; width:min(860px,95vw); max-height:85vh; display:flex; flex-direction:column; }
+#uncateg-modal .um-box { background:#0f1117; border:1px solid #1e2340; border-radius:12px; width:min(1040px,95vw); max-height:85vh; display:flex; flex-direction:column; }
 #uncateg-modal .um-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #1e2340; }
 #uncateg-modal .um-header h3 { margin:0; font-size:15px; color:#e2e8f0; }
 #uncateg-modal .um-header button { background:none; border:none; color:#64748b; font-size:18px; cursor:pointer; padding:4px 8px; }
@@ -740,6 +740,8 @@ loadSyncVersion();
 // ── Modal transactions non catégorisées ──────────────────────
 let _uncategData = [];   // cache pour export CSV
 
+let _uncategAllCategories = [];
+
 async function openUncategorizedModal(type) {
   const m   = state.month || new Date().toISOString().slice(0,7);
   const ytd = state.ytd ? '&ytd=true' : '';
@@ -750,7 +752,7 @@ async function openUncategorizedModal(type) {
               :                       '⚠ Dépenses non catégorisées';
 
   document.getElementById('uncateg-modal-title').textContent = title;
-  document.getElementById('uncateg-modal-tbody').innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#475569">Chargement…</td></tr>';
+  document.getElementById('uncateg-modal-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#475569">Chargement…</td></tr>';
   document.getElementById('uncateg-modal-meta').textContent = '';
   document.getElementById('uncateg-modal-footer').textContent = '';
   document.getElementById('uncateg-modal').style.display = 'flex';
@@ -759,6 +761,7 @@ async function openUncategorizedModal(type) {
     const r = await fetch(url);
     const d = await r.json();
     _uncategData = d.data || [];
+    _uncategAllCategories = d.all_categories || [];
 
     document.getElementById('uncateg-modal-meta').textContent =
       `${d.count} transaction${d.count>1?'s':''} · Total : ${fmtEur(d.total)}`;
@@ -767,27 +770,95 @@ async function openUncategorizedModal(type) {
 
     if (!_uncategData.length) {
       document.getElementById('uncateg-modal-tbody').innerHTML =
-        '<tr><td colspan="5" style="text-align:center;padding:24px;color:#475569">Aucune transaction</td></tr>';
+        '<tr><td colspan="7" style="text-align:center;padding:24px;color:#475569">Aucune transaction</td></tr>';
       return;
     }
 
-    let rows = '';
-    for (const tx of _uncategData) {
-      const sign  = tx.direction === 'credit' ? '+' : '−';
-      const color = tx.direction === 'credit' ? '#4ade80' : '#f87171';
-      const label = (tx.label || '').slice(0, 80) + ((tx.label||'').length > 80 ? '…' : '');
-      rows += `<tr>
-        <td style="white-space:nowrap">${tx.date}</td>
-        <td title="${(tx.label||'').replace(/"/g,'&quot;')}">${label}</td>
-        <td style="color:#94a3b8">${tx.third_party || '—'}</td>
-        <td style="text-align:right;color:${color};font-weight:600">${sign}${fmtEur(parseFloat(tx.amount||0))}</td>
-        <td style="color:#64748b;font-size:11px">${tx.category_name || '—'}</td>
-      </tr>`;
-    }
-    document.getElementById('uncateg-modal-tbody').innerHTML = rows;
+    _renderUncategRows();
   } catch(e) {
     document.getElementById('uncateg-modal-tbody').innerHTML =
-      `<tr><td colspan="5" style="text-align:center;padding:24px;color:#f87171">Erreur : ${e.message}</td></tr>`;
+      `<tr><td colspan="7" style="text-align:center;padding:24px;color:#f87171">Erreur : ${e.message}</td></tr>`;
+  }
+}
+
+function _renderUncategRows() {
+  const opts = _uncategAllCategories.map(c =>
+    `<option value="${c}">${c}</option>`
+  ).join('');
+
+  let rows = '';
+  for (const tx of _uncategData) {
+    const sign   = tx.direction === 'credit' ? '+' : '−';
+    const color  = tx.direction === 'credit' ? '#4ade80' : '#f87171';
+    const label  = (tx.label || '').slice(0, 60) + ((tx.label||'').length > 60 ? '…' : '');
+    const sugg   = tx.suggested_category || '';
+    const suggHtml = sugg
+      ? `<span style="background:#1e3a2f;color:#4ade80;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600">${sugg}</span>`
+      : `<span style="color:#475569;font-size:10px">—</span>`;
+
+    const selectId  = `sel-${tx.id}`;
+    const btnId     = `btn-${tx.id}`;
+    const rowId     = `row-${tx.id}`;
+    const txJson    = JSON.stringify({id: tx.id, label: tx.label, date: tx.date}).replace(/"/g,'&quot;');
+
+    rows += `<tr id="${rowId}">
+      <td style="white-space:nowrap;font-size:11px">${tx.date}</td>
+      <td title="${(tx.label||'').replace(/"/g,'&quot;')}" style="font-size:11px">${label}</td>
+      <td style="text-align:right;color:${color};font-weight:600;white-space:nowrap">${sign}${fmtEur(parseFloat(tx.amount||0))}</td>
+      <td>${suggHtml}</td>
+      <td>
+        <select id="${selectId}"
+          style="background:#1a1d27;border:1px solid #2d3148;border-radius:6px;padding:3px 6px;color:#e2e8f0;font-size:11px;width:100%;max-width:180px">
+          <option value="">— choisir —</option>
+          ${sugg ? `<option value="${sugg}" selected>${sugg}</option>` : ''}
+          ${opts}
+        </select>
+      </td>
+      <td>
+        <button id="${btnId}" onclick="approveCategory('${tx.id}', '${selectId}', '${rowId}', ${txJson})"
+          style="background:#1e3a5f;border:1px solid #3b82f6;border-radius:6px;padding:3px 10px;color:#93c5fd;font-size:11px;cursor:pointer;white-space:nowrap;transition:all .15s"
+          onmouseover="this.style.background='#2563eb';this.style.color='#fff'"
+          onmouseout="this.style.background='#1e3a5f';this.style.color='#93c5fd'">
+          ✓ Valider
+        </button>
+      </td>
+    </tr>`;
+  }
+  document.getElementById('uncateg-modal-tbody').innerHTML = rows;
+}
+
+async function approveCategory(txId, selectId, rowId, txInfo) {
+  const select = document.getElementById(selectId);
+  const cat    = select ? select.value : '';
+  if (!cat) { alert('Choisis une catégorie avant de valider.'); return; }
+
+  const btn = document.querySelector(`#${rowId} button`);
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+
+  try {
+    const r = await fetch(`${API}/api/transactions/${txId}/approve-category`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ category_name: cat, label: txInfo.label, date: txInfo.date })
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      // Retirer la ligne du tableau + de _uncategData
+      const row = document.getElementById(rowId);
+      if (row) row.remove();
+      _uncategData = _uncategData.filter(t => t.id !== txId);
+      // Mettre à jour le compteur
+      const meta = document.getElementById('uncateg-modal-meta');
+      if (meta) meta.textContent = `${_uncategData.length} transaction${_uncategData.length>1?'s':''} restante${_uncategData.length>1?'s':''}`;
+      // Rafraîchir le P&L en arrière-plan
+      fetchAll();
+    } else {
+      alert('Erreur : ' + (d.detail || 'inconnue'));
+      if (btn) { btn.textContent = '✓ Valider'; btn.disabled = false; }
+    }
+  } catch(e) {
+    alert('Erreur réseau : ' + e.message);
+    if (btn) { btn.textContent = '✓ Valider'; btn.disabled = false; }
   }
 }
 
@@ -3109,9 +3180,10 @@ function showToast(msg, type = 'success') {
           <tr>
             <th>Date</th>
             <th>Libellé</th>
-            <th>Tiers</th>
             <th style="text-align:right">Montant</th>
+            <th>Suggestion</th>
             <th>Catégorie</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody id="uncateg-modal-tbody"></tbody>

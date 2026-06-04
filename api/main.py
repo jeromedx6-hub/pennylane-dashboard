@@ -407,11 +407,11 @@ def get_uncategorized_detail(
         return out
 
     if type == "revenue":
-        rows = _fetch_all([("eq", "category_name", "Revenu"), ("eq", "direction", "credit")])
+        rows = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "credit")])
     elif type == "expenses":
         rows = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "debit")])
     else:  # "all"
-        rev  = _fetch_all([("eq", "category_name", "Revenu"), ("eq", "direction", "credit")])
+        rev  = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "credit")])
         exp  = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "debit")])
         rows = sorted(rev + exp, key=lambda r: r["date"], reverse=True)
 

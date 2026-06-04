@@ -284,15 +284,15 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     <div class="kpi-card green"  onclick="openModal('ca')">      <div class="kpi-hint">↗ détail</div><div class="kpi-label">CA Encaissé HT</div>      <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
     <div class="kpi-card red"   onclick="openModal('charges')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Total Charges</div>        <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
     <div class="kpi-card blue"  onclick="openModal('ebitda')">  <div class="kpi-hint">↗ détail</div><div class="kpi-label">EBITDA</div>              <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card purple" onclick="openModal('marge')">  <div class="kpi-hint">↗ détail</div><div class="kpi-label">Marge EBITDA</div>        <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card orange" onclick="openModal('roas')">   <div class="kpi-hint">↗ détail</div><div class="kpi-label">ROAS Cash</div>           <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
   </div>
 
   <!-- KPI Row 2 -->
   <div class="kpi-grid" id="kpi-row2">
-    <div class="kpi-card orange" onclick="openModal('roas')">   <div class="kpi-hint">↗ détail</div><div class="kpi-label">ROAS Cash</div>           <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card blue"  onclick="openModal('mc1')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Acquisition</div>    <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card green" onclick="openModal('mc2')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Sales & Closing</div> <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card purple" onclick="openModal('charges')"><div class="kpi-hint">↗ détail</div><div class="kpi-label">Marge Brute</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card blue"   onclick="openModal('mc1')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Acquisition</div>     <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card green"  onclick="openModal('mc2')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Sales & Closing</div>  <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card purple" onclick="openModal('charges')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Opérationnel</div>     <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card red"    onclick="openModal('charges')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Structure</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
   </div>
 
   <!-- Charts row -->
@@ -1009,13 +1009,13 @@ function renderKPIs(d) {
       { color:'green',  label:'CA Encaissé HT',      val: fmtEur(d.ca_ht),            sup:'', modal:'ca',      deltas:[] },
       { color:'red',    label:'Total Charges',        val: fmtEur(d.total_charges),    sup:'', modal:'charges', deltas:[] },
       { color:'blue',   label:'EBITDA',               val: fmtEur(d.ebitda),           sup:'', modal:'ebitda',  deltas:[] },
-      { color:'purple', label:'Marge EBITDA',         val: fmt(d.ebitda_pct,1),        sup:'%',modal:'marge',   deltas:[] },
+      { color:'orange', label:'ROAS Cash',            val: d.roas_cash ? fmt(d.roas_cash,1)+'x' : '—', sup:'', modal:'roas', deltas:[] },
     ]},
     { id:'kpi-row2', items:[
-      { color:'orange', label:'ROAS Cash',            val: d.roas_cash ? fmt(d.roas_cash,1)+'x' : '—', sup:'', modal:'roas', deltas:[] },
       { color:'blue',   label:'Taux Acquisition',     val: fmt(d.acq_pct,1),            sup:'%',modal:'mc1',     deltas:[] },
       { color:'green',  label:'Taux Sales & Closing', val: fmt(d.sales_pct,1),          sup:'%',modal:'mc2',     deltas:[] },
       { color:'purple', label:'Taux Opérationnel',    val: fmt(d.ops_pct,1),            sup:'%',modal:'charges', deltas:[] },
+      { color:'red',    label:'Taux Structure',        val: fmt(d.structure_pct,1),      sup:'%',modal:'charges', deltas:[] },
     ]},
   ];
 

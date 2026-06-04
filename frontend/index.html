@@ -1538,11 +1538,11 @@ async function openModal(type) {
       renderModalEbitda(d);
       break;
     case 'mc1':
-      document.getElementById('modal-title').textContent = 'MC1 — Marge de Contribution 1';
+      document.getElementById('modal-title').textContent = 'Taux Acquisition — Détail & Évolution';
       renderModalMC(d, 1);
       break;
     case 'mc2':
-      document.getElementById('modal-title').textContent = 'MC2 — Marge de Contribution 2';
+      document.getElementById('modal-title').textContent = 'Taux Sales & Closing — Détail & Évolution';
       renderModalMC(d, 2);
       break;
     case 'roas':
@@ -1631,24 +1631,83 @@ function renderModalEbitda(d) {
   </tbody></table>`;
 }
 
-function renderModalMC(d, step) {
-  const label  = step===1 ? 'MC1' : 'MC2';
-  const val    = step===1 ? d.mc1 : d.mc2;
-  const pct    = step===1 ? d.mc1_pct : d.mc2_pct;
-  const charge = step===1 ? d.total_acquisition : d.total_sales;
-  const pole   = step===1 ? 'Acquisition' : 'Sales & Closing';
+async function renderModalMC(d, step) {
+  const section = step + 1; // section 2 = Acquisition, 3 = Sales
+  const pole    = step===1 ? 'Acquisition' : 'Sales & Closing';
+  const charge  = step===1 ? d.total_acquisition : d.total_sales;
+  const taux    = step===1 ? d.acq_pct : d.sales_pct;
+  const plRows  = (state.pl||[]).filter(r=>r.pl_section===section&&!r.is_revenue)
+                                .sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
+
   document.getElementById('modal-body').innerHTML = `
   <div class="modal-kpi-row">
-    ${kpiBlock(label, fmtEur(val))}
-    ${kpiBlock(`${label} %`, fmtPct(pct))}
-    ${kpiBlock(`Coûts ${pole}`, fmtEur(charge))}
+    ${kpiBlock('Total ' + pole, fmtEur(charge))}
+    ${kpiBlock('Taux / CA', fmt(taux,1)+'%')}
+    ${kpiBlock('CA HT', fmtEur(d.ca_ht))}
   </div>
-  <div class="modal-section">Détail dans le P&L</div>
+
+  <!-- Évolution M/M + Camembert côte à côte -->
+  <div style="display:grid;grid-template-columns:1fr 280px;gap:20px;margin:16px 0">
+    <div>
+      <div class="modal-section" style="margin-bottom:8px">Évolution mensuelle</div>
+      <div style="position:relative;height:180px"><canvas id="mc-evol-chart"></canvas></div>
+    </div>
+    <div>
+      <div class="modal-section" style="margin-bottom:8px">Répartition</div>
+      <div style="position:relative;height:180px"><canvas id="mc-donut-chart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="modal-section">Détail postes</div>
   <table class="detail-table"><thead><tr><th>Poste</th><th>Montant</th><th>% CA</th></tr></thead><tbody>
-    ${(state.pl||[]).filter(r=>r.pl_section===(step+1)&&!r.is_revenue).sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))
-      .map(r=>`<tr><td>${r.poste_budgetaire}</td><td class="negative">— ${fmtEur(Math.abs(r.amount))}</td><td>${fmt(Math.abs(r.amount)/d.ca_ht*100,1)}%</td></tr>`).join('')}
-    <tr><td>${label}</td><td class="${val>=0?'positive':'negative'}">${fmtEur(val)}</td><td class="${val>=0?'positive':'negative'}">${fmtPct(pct)}</td></tr>
+    ${plRows.map(r=>`<tr><td>${r.poste_budgetaire}</td><td class="negative">— ${fmtEur(Math.abs(r.amount))}</td><td>${fmt(Math.abs(r.amount)/d.ca_ht*100,1)}%</td></tr>`).join('')}
+    <tr style="font-weight:700"><td>TOTAL ${pole.toUpperCase()}</td><td class="negative">— ${fmtEur(charge)}</td><td>${fmt(taux,1)}%</td></tr>
   </tbody></table>`;
+
+  // ── Évolution M/M depuis API ──────────────────────────
+  try {
+    const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
+    const evol = await fetch(`${API}/api/pl_section?section=${section}&year=${year}`).then(r=>r.json());
+    const months = evol.data || [];
+    const labels = months.map(m => { const [,mm]=m.month.split('-'); return ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'][+mm-1]; });
+    const vals   = months.map(m => Math.abs(m.amount));
+    const curMo  = (state.selectedMonth||'').slice(5,7);
+    const bgColors = months.map(m => m.month.slice(5,7)===curMo ? '#6366f1' : 'rgba(99,102,241,0.4)');
+
+    const ctx1 = document.getElementById('mc-evol-chart')?.getContext('2d');
+    if (ctx1) new Chart(ctx1, {
+      type: 'bar',
+      data: { labels, datasets:[{ data:vals, backgroundColor:bgColors, borderRadius:3 }] },
+      options: { responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, datalabels:{display:false},
+          tooltip:{ callbacks:{ label: i => fmtEur(i.raw) } } },
+        scales:{
+          x:{ grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
+          y:{ grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}, callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`}, beginAtZero:true }
+        }
+      }
+    });
+  } catch(e) { console.error(e); }
+
+  // ── Camembert répartition postes ─────────────────────
+  if (plRows.length) {
+    const ctx2 = document.getElementById('mc-donut-chart')?.getContext('2d');
+    const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#ddd6fe','#ede9fe','#f5f3ff'];
+    if (ctx2) new Chart(ctx2, {
+      type: 'doughnut',
+      data: {
+        labels: plRows.map(r=>r.poste_budgetaire),
+        datasets:[{ data: plRows.map(r=>Math.abs(r.amount)),
+          backgroundColor: plRows.map((_,i)=>COLORS[i%COLORS.length]),
+          borderWidth:0 }]
+      },
+      options: { responsive:true, maintainAspectRatio:false, cutout:'60%',
+        plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', font:{size:10}, boxWidth:10, padding:6 } },
+          datalabels:{display:false},
+          tooltip:{ callbacks:{ label: i => `${i.label}: ${fmtEur(i.raw)} (${fmt(i.raw/charge*100,1)}%)` } } }
+      }
+    });
+  }
 }
 
 function renderModalRoas(d) {

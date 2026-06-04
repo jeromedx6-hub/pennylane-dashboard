@@ -291,8 +291,8 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="kpi-grid" id="kpi-row2">
     <div class="kpi-card blue"   onclick="openModal('mc1')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Acquisition</div>     <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
     <div class="kpi-card green"  onclick="openModal('mc2')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Sales & Closing</div>  <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card purple" onclick="openModal('charges')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Opérationnel</div>     <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card red"    onclick="openModal('charges')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Structure</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card purple" onclick="openModal('mc3')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Opérationnel</div>     <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card red"    onclick="openModal('mc4')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Structure</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
   </div>
 
   <!-- Charts row -->
@@ -1014,8 +1014,8 @@ function renderKPIs(d) {
     { id:'kpi-row2', items:[
       { color:'blue',   label:'Taux Acquisition',     val: fmt(d.acq_pct,1),            sup:'%',modal:'mc1',     deltas:[] },
       { color:'green',  label:'Taux Sales & Closing', val: fmt(d.sales_pct,1),          sup:'%',modal:'mc2',     deltas:[] },
-      { color:'purple', label:'Taux Opérationnel',    val: fmt(d.ops_pct,1),            sup:'%',modal:'charges', deltas:[] },
-      { color:'red',    label:'Taux Structure',        val: fmt(d.structure_pct,1),      sup:'%',modal:'charges', deltas:[] },
+      { color:'purple', label:'Taux Opérationnel',    val: fmt(d.ops_pct,1),            sup:'%',modal:'mc3', deltas:[] },
+      { color:'red',    label:'Taux Structure',        val: fmt(d.structure_pct,1),      sup:'%',modal:'mc4', deltas:[] },
     ]},
   ];
 
@@ -1545,6 +1545,14 @@ async function openModal(type) {
       document.getElementById('modal-title').textContent = 'Taux Sales & Closing — Détail & Évolution';
       renderModalMC(d, 2);
       break;
+    case 'mc3':
+      document.getElementById('modal-title').textContent = 'Taux Opérationnel — Détail & Évolution';
+      renderModalMC(d, 3);
+      break;
+    case 'mc4':
+      document.getElementById('modal-title').textContent = 'Taux Structure — Détail & Évolution';
+      renderModalMC(d, 4);
+      break;
     case 'roas':
       document.getElementById('modal-title').textContent = 'ROAS Cash — Détail Acquisition';
       renderModalRoas(d);
@@ -1632,10 +1640,15 @@ function renderModalEbitda(d) {
 }
 
 async function renderModalMC(d, step) {
-  const section = step + 1; // section 2 = Acquisition, 3 = Sales
-  const pole    = step===1 ? 'Acquisition' : 'Sales & Closing';
-  const charge  = step===1 ? d.total_acquisition : d.total_sales;
-  const taux    = step===1 ? d.acq_pct : d.sales_pct;
+  // step: 1=Acquisition(s2), 2=Sales(s3), 3=Ops(s4), 4=Structure(s5)
+  const sectionMap = { 1:2, 2:3, 3:4, 4:5 };
+  const poleMap    = { 1:'Acquisition', 2:'Sales & Closing', 3:'Opérationnel', 4:'Structure' };
+  const chargeMap  = { 1:d.total_acquisition, 2:d.total_sales, 3:d.total_ops, 4:d.total_structure };
+  const tauxMap    = { 1:d.acq_pct, 2:d.sales_pct, 3:d.ops_pct, 4:d.structure_pct };
+  const section = sectionMap[step];
+  const pole    = poleMap[step];
+  const charge  = chargeMap[step];
+  const taux    = tauxMap[step];
   const plRows  = (state.pl||[]).filter(r=>r.pl_section===section&&!r.is_revenue)
                                 .sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
 

@@ -290,8 +290,8 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <!-- KPI Row 2 -->
   <div class="kpi-grid" id="kpi-row2">
     <div class="kpi-card orange" onclick="openModal('roas')">   <div class="kpi-hint">↗ détail</div><div class="kpi-label">ROAS Cash</div>           <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card blue"  onclick="openModal('mc1')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">MC1 (après Acq.)</div>   <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card green" onclick="openModal('mc2')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">MC2 (après Sales)</div> <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card blue"  onclick="openModal('mc1')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Acquisition</div>    <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card green" onclick="openModal('mc2')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Sales & Closing</div> <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
     <div class="kpi-card purple" onclick="openModal('charges')"><div class="kpi-hint">↗ détail</div><div class="kpi-label">Marge Brute</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
   </div>
 
@@ -1027,9 +1027,9 @@ function renderKPIs(d) {
     ]},
     { id:'kpi-row2', items:[
       { color:'orange', label:'ROAS Cash',            val: d.roas_cash ? fmt(d.roas_cash,1)+'x' : '—', sup:'', modal:'roas', deltas:[] },
-      { color:'blue',   label:'MC1 (après Acq.)',     val: fmt(d.mc1_pct,1),           sup:'%',modal:'mc1',     deltas:[] },
-      { color:'green',  label:'MC2 (après Sales)',    val: fmt(d.mc2_pct,1),           sup:'%',modal:'mc2',     deltas:[] },
-      { color:'purple', label:'Marge Brute',          val: fmt(d.marge_brute_pct,1),   sup:'%',modal:'charges', deltas:[] },
+      { color:'blue',   label:'Taux Acquisition',     val: fmt(d.acq_pct,1),            sup:'%',modal:'mc1',     deltas:[] },
+      { color:'green',  label:'Taux Sales & Closing', val: fmt(d.sales_pct,1),          sup:'%',modal:'mc2',     deltas:[] },
+      { color:'purple', label:'Taux Opérationnel',    val: fmt(d.ops_pct,1),            sup:'%',modal:'charges', deltas:[] },
     ]},
   ];
 

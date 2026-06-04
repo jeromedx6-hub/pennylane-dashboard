@@ -253,6 +253,11 @@ def get_kpis(month: str = Query(default=None), ytd: bool = Query(default=False))
         "mc2_pct":           pct(s("mc2")),
         "marge_brute":       round(s("marge_brute"), 2),
         "marge_brute_pct":   pct(s("marge_brute")),
+        # Taux de coût par pôle = dépenses / CA
+        "acq_pct":           pct(s("total_acquisition")),
+        "sales_pct":         pct(s("total_sales")),
+        "ops_pct":           pct(s("total_ops")),
+        "structure_pct":     pct(s("total_structure")),
         "ebitda":            round(s("ebitda"), 2),
         "ebitda_pct":        pct(s("ebitda")),
         "roas_cash":         roas,

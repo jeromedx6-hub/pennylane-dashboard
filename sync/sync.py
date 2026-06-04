@@ -157,7 +157,12 @@ def normalize_transaction(tx, mapping=None):
     # Catégorie principale : poids le plus élevé HORS familles exclues (cf. EXCLUDED_FAMILY_IDS)
     # Tiebreaker : familles charges déprioritisées pour les crédits (cf. EXPENSE_FAMILY_IDS)
     cats = tx.get("categories") or []
-    if cats:
+    # Ventilation multi-catégories : on ne sait pas comment répartir → non catégorisée
+    if len(cats) > 1:
+        category_name = ""
+        category_id   = ""
+        family_id     = ""
+    elif cats:
         cats_sorted   = sorted(cats, key=lambda c: _cat_sort_key(c, direction))
         preferred     = [c for c in cats_sorted
                          if int((c.get("category_group") or {}).get("id", 0) or 0)

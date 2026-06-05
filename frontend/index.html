@@ -2559,7 +2559,7 @@ function setRev30View(view) {
   document.getElementById('btn-view-week').style.color      = view === 'week' ? '#fff' : '#475569';
   const titleEl = document.getElementById('rev30-chart-title');
   if (titleEl) titleEl.textContent = view === 'week' ? 'CA encaissé · Semaine par semaine' : 'CA encaissé · Jour par jour';
-  if (rev30Data) renderRev30Chart(rev30Data);
+  if (rev30Data) renderRev30(rev30Data);
 }
 
 // Regroupe les données daily en semaines ISO (lundi → dimanche)

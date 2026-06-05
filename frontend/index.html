@@ -261,22 +261,43 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ MAIN ════════════════════════════════════════════════ -->
 <div class="main">
 
+<!-- ════ GLOBAL HEADER (commun à toutes les pages) ══════════ -->
+<div id="global-header" style="
+  display:flex;align-items:center;justify-content:space-between;
+  background:#12141e;border-bottom:1px solid #1e2340;
+  padding:10px 24px;margin-bottom:20px;gap:16px;flex-wrap:wrap;
+  position:sticky;top:0;z-index:90;">
+
+  <!-- Titre dynamique + sous-titre -->
+  <div>
+    <div id="gh-title" style="font-size:15px;font-weight:700;color:#fff">Dashboard Financier</div>
+    <div id="gh-sub" style="font-size:11px;color:#475569;margin-top:2px">Données Pennylane · Sync automatique quotidienne</div>
+  </div>
+
+  <!-- Contrôles contextuels (injectés par showPage) -->
+  <div id="gh-controls" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"></div>
+
+  <!-- Zone droite fixe : badge sync + bouton -->
+  <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+    <div class="sync-badge" id="gh-sync-badge">
+      <div class="dot"></div>
+      <span id="gh-sync-time">Chargement…</span>
+      <span id="gh-sync-version" style="margin-left:6px;padding:1px 6px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:4px;font-size:10px;color:#6366f1;font-weight:600;letter-spacing:.03em"></span>
+    </div>
+    <button id="gh-sync-btn" class="sync-btn" onclick="openSyncModal()" title="Synchroniser Pennylane, recalculer le P&L et mettre à jour toutes les catégories">
+      ⟳ Recalculer
+    </button>
+  </div>
+</div>
+
 <!-- ════ PAGE : INDICATEURS ════════════════════════════════ -->
 <div id="page-indicateurs" class="page">
 
-  <!-- Header -->
-  <div class="page-header">
-    <div>
-      <div class="page-title">Indicateurs <span>Financiers</span></div>
-      <div class="header-sub" id="header-sub">Données Pennylane · Sync quotidienne automatique</div>
-    </div>
-    <div class="header-right">
-      <select id="month-combo" onchange="onComboChange(this.value)"
-        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 16px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:170px;outline:none">
-      </select>
-      <div class="sync-badge"><div class="dot"></div><span id="sync-time">Sync OK</span><span id="sync-version" style="margin-left:6px;padding:1px 6px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:4px;font-size:10px;color:#6366f1;font-weight:600;letter-spacing:.03em"></span></div>
-      <button class="sync-btn" id="sync-btn-indicateurs" onclick="openSyncModal()">⟳ Recalculer</button>
-    </div>
+  <!-- contrôles contextuels injectés dans global-header via showPage -->
+  <div style="display:none">
+    <span id="sync-time"></span>
+    <span id="sync-version"></span>
+    <span id="header-sub"></span>
   </div>
 
   <!-- KPI Row 1 -->
@@ -386,20 +407,9 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ PAGE : KPI REVENUE ════════════════════════════════ -->
 <div id="page-kpi" class="page" style="display:none">
 
-  <div class="page-header">
-    <div>
-      <div class="page-title">KPI <span>Revenue</span></div>
-      <div class="header-sub" id="rev30-period-sub">30 jours glissants · Source Pennylane</div>
-    </div>
-    <div class="header-right">
-      <div class="date-selector">
-        <button class="date-btn active" id="rev30-btn-rolling" onclick="setRev30Mode('rolling',this)">30j glissants</button>
-        <button class="date-btn" id="rev30-btn-month" onclick="setRev30Mode('month',this)">Mois</button>
-      </div>
-      <select id="rev30-month-select" onchange="fetchRev30()"
-        style="display:none;background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 12px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"></select>
-      <button class="sync-btn" onclick="openSyncModal()">⟳ Recalculer</button>
-    </div>
+  <!-- contrôles contextuels KPI Revenue (injectés dans gh-controls) -->
+  <div style="display:none">
+    <span id="rev30-period-sub">30 jours glissants · Source Pennylane</span>
   </div>
 
   <!-- 4 KPI Cards -->
@@ -461,23 +471,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ PAGE : ALERTES ════════════════════════════════════ -->
 <div id="page-alertes" class="page" style="display:none">
 
-  <div class="page-header">
-    <div>
-      <div class="page-title">Alertes <span>Superviseur</span></div>
-      <div class="header-sub">Transactions non catégorisées · Nouvelles catégories · Recatégorisations</div>
-    </div>
-    <div class="header-right">
-      <select id="alerts-days" onchange="loadAlerts()"
-        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none">
-        <option value="7">7 derniers jours</option>
-        <option value="30" selected>30 derniers jours</option>
-        <option value="90">90 derniers jours</option>
-        <option value="180">6 derniers mois</option>
-      </select>
-      <div class="sync-badge"><div class="dot"></div><span id="alerts-sync-time">Chargement…</span></div>
-      <button class="sync-btn" id="sync-cats-btn" onclick="syncCategoriesNow()">⟳ Mettre à jour</button>
-    </div>
-  </div>
+  <div style="display:none"><span id="alerts-sync-time"></span></div>
 
   <!-- KPI cards résumé -->
   <div id="alerts-kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
@@ -524,19 +518,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ PAGE : MAPPING ════════════════════════════════════ -->
 <div id="page-mapping" class="page" style="display:none">
 
-  <div class="page-header">
-    <div>
-      <div class="page-title">Mapping <span>Catégories</span></div>
-      <div class="header-sub">Statut du mapping Pennylane → P&L par section · mis à jour à chaque sync</div>
-    </div>
-    <div class="header-right">
-      <input type="month" id="mapping-month"
-        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"
-        onchange="loadMappingStatus()">
-      <div class="sync-badge"><div class="dot"></div><span id="mapping-sync-label">—</span></div>
-      <button class="sync-btn" onclick="loadMappingStatus()">⟳ Rafraîchir</button>
-    </div>
-  </div>
+  <div style="display:none"><span id="mapping-sync-label"></span></div>
 
   <!-- KPI row -->
   <div id="mapping-kpi-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
@@ -573,15 +555,6 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ PAGE : RELEASE NOTES ══════════════════════════════ -->
 <div id="page-release" class="page" style="display:none">
 
-  <div class="page-header">
-    <div>
-      <div class="page-title">Release <span>Notes</span></div>
-      <div class="header-sub">Historique des changements détectés et mises à jour du superviseur</div>
-    </div>
-    <div class="header-right">
-      <button class="sync-btn" onclick="loadReleaseNotes()">⟳ Rafraîchir</button>
-    </div>
-  </div>
 
   <div class="card">
     <div id="release-notes-body"><div style="color:#475569;text-align:center;padding:40px">Chargement…</div></div>
@@ -592,15 +565,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ═══════════════════════ PAGE CRM SYSTEME.IO ═══════════════════════════ -->
 <div id="page-crm" class="page" style="display:none">
 
-  <div class="page-header">
-    <div>
-      <div class="page-title">◈ &nbsp;CRM <span>Systeme.io</span></div>
-      <div class="header-sub" id="crm-sync-time">Chargement des données…</div>
-    </div>
-    <div class="header-right">
-      <button class="sync-btn" id="crm-refresh-btn" onclick="fetchCRM(true)">⟳ &nbsp;Actualiser</button>
-    </div>
-  </div>
+  <div style="display:none"><span id="crm-sync-time"></span></div>
 
   <!-- KPI Cards -->
   <div class="kpi-grid" id="crm-kpi-grid" style="margin-bottom:20px">
@@ -717,20 +682,25 @@ async function loadSyncVersion() {
     const r = await fetch(`${API}/api/sync_status`);
     const d = await r.json();
     const ver = d.sync_version || '';
-    const el  = document.getElementById('sync-version');
-    if (el && ver && ver !== '—') el.textContent = ver;
 
-    // Badge en retard : dot rouge + tooltip âge
+    // Mise à jour global header
+    const ghVer  = document.getElementById('gh-sync-version');
+    const ghTime = document.getElementById('gh-sync-time');
+    const ghDot  = document.querySelector('#gh-sync-badge .dot');
+    if (ghVer && ver && ver !== '—') ghVer.textContent = ver;
+
     if (d.sync_overdue) {
-      const dot = document.querySelector('.sync-badge .dot');
-      if (dot) dot.style.background = '#ef4444';
-      const timeEl = document.getElementById('sync-time');
-      if (timeEl && timeEl.textContent.startsWith('Sync OK')) {
-        const h = d.sync_age_hours ? `${d.sync_age_hours}h` : '?';
-        timeEl.textContent = `⚠ Sync en retard · ${h}`;
-        timeEl.style.color = '#f97316';
-      }
+      if (ghDot)  ghDot.style.background = '#ef4444';
+      if (ghTime) { ghTime.textContent = `⚠ Sync en retard · ${d.sync_age_hours||'?'}h`; ghTime.style.color = '#f97316'; }
+    } else {
+      if (ghTime) ghTime.textContent = 'Sync OK';
     }
+
+    // Compat anciens éléments (cachés)
+    const el = document.getElementById('sync-version');
+    if (el && ver) el.textContent = ver;
+    const timeEl = document.getElementById('sync-time');
+    if (timeEl) timeEl.textContent = ghTime ? ghTime.textContent : 'Sync OK';
   } catch(e) {}
 }
 loadSyncVersion();
@@ -1439,6 +1409,9 @@ function renderCAbars(plData) {
     </div>`;
   }).join('');
 }
+
+// ── Alias pour showPage ──────────────────────────────────────
+function populateMonthCombo() { buildMonthCombo(); }
 
 // ── Month selector ───────────────────────────────────────────
 function buildMonthCombo() {
@@ -2154,16 +2127,88 @@ function closeModalOutside(e) {
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
 
 // ── Navigation pages ─────────────────────────────────────────
+// ── Config des pages pour le header global ────────────────────
+const PAGE_CONFIG = {
+  indicateurs: {
+    title:    'Indicateurs <span style="color:#6366f1">Financiers</span>',
+    sub:      'Données Pennylane · Sync quotidienne automatique',
+    controls: () => `
+      <select id="month-combo" onchange="onComboChange(this.value)"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 16px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:170px;outline:none">
+      </select>`,
+    onShow:   null,
+  },
+  kpi: {
+    title:    'KPI <span style="color:#6366f1">Revenue</span>',
+    sub:      '30 jours glissants · Source Pennylane',
+    controls: () => `
+      <div class="date-selector">
+        <button class="date-btn active" id="rev30-btn-rolling" onclick="setRev30Mode('rolling',this)">30j glissants</button>
+        <button class="date-btn" id="rev30-btn-month" onclick="setRev30Mode('month',this)">Mois</button>
+      </div>
+      <select id="rev30-month-select" onchange="fetchRev30()"
+        style="display:none;background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 12px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"></select>`,
+    onShow:   () => { fetchRev30(); fetchNewClients(); },
+  },
+  alertes: {
+    title:    'Alertes <span style="color:#6366f1">Superviseur</span>',
+    sub:      'Transactions non catégorisées · Nouvelles catégories · Recatégorisations',
+    controls: () => `
+      <select id="alerts-days" onchange="loadAlerts()"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none">
+        <option value="7">7 derniers jours</option>
+        <option value="30" selected>30 derniers jours</option>
+        <option value="90">90 derniers jours</option>
+        <option value="180">6 derniers mois</option>
+      </select>`,
+    onShow:   loadAlerts,
+  },
+  mapping: {
+    title:    'Mapping <span style="color:#6366f1">Catégories</span>',
+    sub:      'Statut du mapping Pennylane → P&L · mis à jour à chaque sync',
+    controls: () => `
+      <input type="month" id="mapping-month"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"
+        onchange="loadMappingStatus()">`,
+    onShow:   loadMappingStatus,
+  },
+  release: {
+    title:    'Release <span style="color:#6366f1">Notes</span>',
+    sub:      'Historique des changements détectés et mises à jour du superviseur',
+    controls: () => '',
+    onShow:   loadReleaseNotes,
+  },
+  crm: {
+    title:    '◈ &nbsp;CRM <span style="color:#6366f1">Systeme.io</span>',
+    sub:      'Données Systeme.io · Contacts et ventes',
+    controls: () => '',
+    onShow:   () => fetchCRM(),
+  },
+};
+
+let _currentPage = 'indicateurs';
+
 function showPage(page, el) {
+  _currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
   document.getElementById('page-' + page).style.display = '';
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
-  if (page === 'kpi')    { fetchRev30(); fetchNewClients(); }
-  if (page === 'crm')    fetchCRM();
-  if (page === 'alertes') loadAlerts();
-  if (page === 'mapping') loadMappingStatus();
-  if (page === 'release') loadReleaseNotes();
+
+  // Mettre à jour le header global
+  const cfg = PAGE_CONFIG[page] || {};
+  const ghTitle    = document.getElementById('gh-title');
+  const ghSub      = document.getElementById('gh-sub');
+  const ghControls = document.getElementById('gh-controls');
+  if (ghTitle)    ghTitle.innerHTML  = cfg.title    || page;
+  if (ghSub)      ghSub.textContent  = cfg.sub      || '';
+  if (ghControls) ghControls.innerHTML = cfg.controls ? cfg.controls() : '';
+
+  // Re-peupler le month-combo si on revient sur Indicateurs
+  if (page === 'indicateurs' && typeof populateMonthCombo === 'function') populateMonthCombo();
+
+  // Callback spécifique
+  if (cfg.onShow) cfg.onShow();
 }
 
 // ── Alertes ───────────────────────────────────────────────────
@@ -3182,6 +3227,17 @@ function closeImpayes() {
 }
 
 // ── Init ─────────────────────────────────────────────────────
+// Initialiser le header global sur la page de démarrage (indicateurs)
+(function initGlobalHeader() {
+  const cfg = PAGE_CONFIG['indicateurs'];
+  const ghTitle    = document.getElementById('gh-title');
+  const ghSub      = document.getElementById('gh-sub');
+  const ghControls = document.getElementById('gh-controls');
+  if (ghTitle)    ghTitle.innerHTML  = cfg.title;
+  if (ghSub)      ghSub.textContent  = cfg.sub;
+  if (ghControls) ghControls.innerHTML = cfg.controls();
+})();
+
 buildMonthCombo();
 fetchAll();
 // Badge alertes au démarrage (sans afficher la page)
@@ -3225,6 +3281,8 @@ async function launchSync() {
   document.getElementById('sync-progress-label').textContent  = `Sync ${from} → ${to}…`;
   _setSyncBtns(true);
 
+  // Étape 1 : sync Pennylane → transactions
+  document.getElementById('sync-progress-label').textContent = `1/3 · Sync Pennylane ${from} → ${to}…`;
   await fetch(`${API}/api/sync?date_from=${from}&date_to=${to}`, {method:'POST'});
 
   _syncPoll = setInterval(async () => {
@@ -3233,28 +3291,47 @@ async function launchSync() {
       const s = await r.json();
       if (!s.running) {
         clearInterval(_syncPoll); _syncPoll = null;
+
+        if (s.error) {
+          document.getElementById('sync-modal').classList.remove('open');
+          _setSyncBtns(false);
+          showToast('❌ Erreur sync : ' + s.error, 'error');
+          return;
+        }
+
+        // Étape 2 : sync catégories Pennylane
+        document.getElementById('sync-progress-label').textContent = '2/3 · Mise à jour des catégories Pennylane…';
+        try { await fetch(`${API}/api/sync/categories`, {method:'POST'}); } catch(e) {}
+
+        // Étape 3 : recalcul P&L
+        document.getElementById('sync-progress-label').textContent = '3/3 · Recalcul P&L et KPIs…';
+        try { await fetch(`${API}/api/sync/recompute-pl`, {method:'POST'}); } catch(e) {}
+
+        // Fin
         document.getElementById('sync-modal').classList.remove('open');
         _setSyncBtns(false);
-        if (s.error) {
-          showToast('❌ Erreur : ' + s.error, 'error');
-        } else {
-          showToast(`✅ Sync terminé · ${from} → ${to}`, 'success');
-          // Refresh la page active
-          const pg = document.querySelector('.page[style*="display: block"], .page:not([style*="none"])');
-          if (document.getElementById('page-indicateurs').style.display !== 'none') fetchAll();
-          else if (document.getElementById('page-kpi').style.display     !== 'none') fetchRev30();
-        }
+        loadSyncVersion();
+        showToast(`✅ Sync complet · transactions + catégories + P&L`, 'success');
+
+        // Refresh page active
+        const cfg = PAGE_CONFIG[_currentPage];
+        if (_currentPage === 'indicateurs') fetchAll();
+        else if (_currentPage === 'kpi')    { fetchRev30(); fetchNewClients(); }
+        else if (_currentPage === 'alertes') loadAlerts();
+        else if (_currentPage === 'mapping') loadMappingStatus();
+        else if (_currentPage === 'crm')    fetchCRM();
       }
     } catch(e) { /* ignore erreurs réseau transitoires */ }
   }, 2000);
 }
 
 function _setSyncBtns(running) {
-  document.querySelectorAll('.sync-btn').forEach(b => {
-    b.disabled = running;
-    b.classList.toggle('running', running);
-    b.innerHTML = running ? '<span class="spin">⟳</span> En cours…' : '⟳ Recalculer';
-  });
+  const btn = document.getElementById('gh-sync-btn');
+  if (btn) {
+    btn.disabled = running;
+    btn.classList.toggle('running', running);
+    btn.innerHTML = running ? '<span class="spin">⟳</span> En cours…' : '⟳ Recalculer';
+  }
 }
 
 function showToast(msg, type = 'success') {
@@ -3271,7 +3348,14 @@ function showToast(msg, type = 'success') {
   <div class="modal" style="width:420px;max-width:95vw" onclick="event.stopPropagation()">
     <button class="modal-close" onclick="closeSyncModal()">✕</button>
     <div class="modal-title">Recalculer les données</div>
-    <div class="modal-sub" style="margin-bottom:20px">Resynchronise Pennylane → Supabase sur la période choisie et recalcule le P&L</div>
+    <div class="modal-sub" style="margin-bottom:20px">Lance les 3 étapes : sync Pennylane → mise à jour catégories → recalcul P&L &amp; KPIs</div>
+
+    <!-- Ce que fait le bouton -->
+    <div style="background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:11px;color:#64748b;line-height:1.8">
+      <div>① <strong style="color:#94a3b8">Sync transactions</strong> — récupère toutes les opérations Pennylane sur la période</div>
+      <div>② <strong style="color:#94a3b8">Catégories</strong> — détecte les nouvelles catégories et mise à jour du mapping</div>
+      <div>③ <strong style="color:#94a3b8">Recalcul P&L + KPIs</strong> — recompute le compte de résultat et tous les indicateurs</div>
+    </div>
 
     <div id="sync-modal-form">
       <div style="display:flex;gap:12px;margin-bottom:16px">
@@ -3286,21 +3370,17 @@ function showToast(msg, type = 'success') {
             style="width:100%;background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:8px 10px;color:#e2e8f0;font-size:12px;outline:none">
         </div>
       </div>
-      <div style="background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:11px;color:#64748b;line-height:1.6">
-        ⚡ Recalcule les <strong style="color:#94a3b8">transactions</strong>, le <strong style="color:#94a3b8">P&L quotidien</strong> et les <strong style="color:#94a3b8">KPIs</strong> pour cette période.<br>
-        Utile si des montants ont été corrigés dans Pennylane.
-      </div>
       <button id="sync-modal-btn" onclick="launchSync()"
         style="width:100%;padding:11px;background:#6366f1;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s"
         onmouseover="this.style.background='#4f46e5'" onmouseout="this.style.background='#6366f1'">
-        🔄 Lancer le sync
+        🔄 Lancer le recalcul complet
       </button>
     </div>
 
     <div id="sync-modal-progress" style="display:none;text-align:center;padding:20px 0">
       <div style="font-size:28px;margin-bottom:12px"><span class="spin" style="display:inline-block">⟳</span></div>
-      <div id="sync-progress-label" style="color:#94a3b8;font-size:13px"></div>
-      <div style="font-size:11px;color:#475569;margin-top:8px">Récupération Pennylane · Calcul P&L · KPIs…</div>
+      <div id="sync-progress-label" style="color:#94a3b8;font-size:13px;font-weight:600"></div>
+      <div style="font-size:11px;color:#475569;margin-top:8px">Patientez, cela peut prendre 30-60 secondes…</div>
     </div>
   </div>
 </div>

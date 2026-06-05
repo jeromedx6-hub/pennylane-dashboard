@@ -440,10 +440,17 @@ def get_uncategorized_detail(
                       for r in sb.table("category_mapping").select("pennylane_category_name").execute().data]
 
     def _suggest(label: str) -> str:
-        """Retourne la catégorie suggérée si un pattern matche le libellé."""
+        """Retourne la catégorie suggérée si un pattern matche le libellé.
+        Support multi-mots-clés : séparer par ' && ' dans le pattern (AND logique).
+        Ex: 'ALCHIMISTE && payment_paid' → les deux doivent être présents.
+        Les règles multi-mots sont testées en premier (plus spécifiques).
+        """
         lbl_lower = (label or "").lower()
-        for rule in rules:
-            if rule["pattern"].lower() in lbl_lower:
+        # Trier : multi-keywords d'abord (plus spécifiques)
+        sorted_rules = sorted(rules, key=lambda r: -r["pattern"].count("&&"))
+        for rule in sorted_rules:
+            keywords = [k.strip().lower() for k in rule["pattern"].split("&&")]
+            if all(k in lbl_lower for k in keywords):
                 return rule["category_name"]
         return ""
 

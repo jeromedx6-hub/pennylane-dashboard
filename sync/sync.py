@@ -279,6 +279,10 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
             aggregated[key]["tx_count"]  += 1
             continue
 
+        # Flux internes (virements Stripe→banque, GC→banque, etc.) : exclus du P&L
+        if m.get("poste_budgetaire") == "Flux internes":
+            continue
+
         key = m["poste_budgetaire"]
         if key not in aggregated:
             aggregated[key] = {
@@ -311,11 +315,13 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
 
 def compute_kpis(sb, target_date):
     date_str = target_date.isoformat()
-    rows = sb.table("pl_daily").select("pl_section,is_revenue,amount,amount_ht,axe3_analytics").eq("date", date_str).execute().data
+    rows = sb.table("pl_daily").select("pl_section,is_revenue,amount,amount_ht,axe3_analytics,poste_budgetaire").eq("date", date_str).execute().data
 
     totals = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
     total_pub = 0.0
     for r in rows:
+        if r.get("poste_budgetaire") == "Flux internes":
+            continue
         s = r.get("pl_section")
         if s:
             # Utiliser amount_ht si disponible, sinon amount (TTC en fallback)

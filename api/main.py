@@ -341,6 +341,9 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
 
     aggregated: dict[str, dict] = {}
     for r in rows:
+        # Flux internes exclus du P&L (virements Stripe→banque, GC→banque, etc.)
+        if r.get("poste_budgetaire") == "Flux internes":
+            continue
         key = r["poste_budgetaire"]
         if key not in aggregated:
             aggregated[key] = {
@@ -885,7 +888,7 @@ def get_pl_section(
 
     rows = (
         sb.table("pl_daily")
-        .select("date, amount")
+        .select("date, amount, poste_budgetaire")
         .eq("pl_section", section)
         .eq("is_revenue", revenue)
         .gte("date", d_from).lte("date", d_to)
@@ -894,6 +897,8 @@ def get_pl_section(
 
     by_month: dict[str, dict] = {}
     for r in rows:
+        if r.get("poste_budgetaire") == "Flux internes":
+            continue
         m = r["date"][:7]
         if m not in by_month:
             by_month[m] = {"amount": 0.0, "tx_count": 0}

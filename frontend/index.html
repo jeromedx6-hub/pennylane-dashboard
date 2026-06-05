@@ -1737,14 +1737,13 @@ function kpiBlock(label, val, tags='') {
   return `<div class="modal-kpi"><div class="modal-kpi-label">${label}</div><div class="modal-kpi-val">${val}</div>${tags}</div>`;
 }
 
-// ── Helper : donut (crée ou met à jour) ──────────────────────────
+// ── Helper : donut ────────────────────────────────────────────────
 function _drawDonut(canvasId, lbls, vals, total, colors, title) {
-  const el  = document.getElementById(canvasId);
+  const el = document.getElementById(canvasId);
   if (!el) return null;
   const existing = Chart.getChart(el);
   if (existing) existing.destroy();
-  const ctx = el.getContext('2d');
-  return new Chart(ctx, {
+  return new Chart(el.getContext('2d'), {
     type:'doughnut',
     data:{ labels:lbls, datasets:[{ data:vals, backgroundColor:colors.slice(0,lbls.length), borderWidth:0 }] },
     options:{ responsive:true, maintainAspectRatio:false, cutout:'62%',
@@ -1758,23 +1757,55 @@ function _drawDonut(canvasId, lbls, vals, total, colors, title) {
   });
 }
 
-// ── Helper : chart stacké évolution mensuelle ────────────────────
-// opts: { donutId, donutColors, donutInitIdx, getDonutData(monthIdx, evol) }
+// ── Boutons €/% toggle (HTML) ─────────────────────────────────────
+function _evolToggleHtml(btnId) {
+  return `<div id="${btnId}" style="display:flex;gap:3px">
+    <button data-view="eur" onclick="_evolSetView('${btnId}','eur')"
+      style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #6366f1;background:#6366f1;color:#fff;cursor:pointer">€</button>
+    <button data-view="pct" onclick="_evolSetView('${btnId}','pct')"
+      style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #334155;background:transparent;color:#64748b;cursor:pointer">%</button>
+  </div>`;
+}
+// Callback global (accessible depuis onclick inline)
+window._evolSetView = function(btnId, view) {
+  const container = document.getElementById(btnId);
+  if (!container) return;
+  container.querySelectorAll('button').forEach(b => {
+    const active = b.dataset.view === view;
+    b.style.background    = active ? '#6366f1' : 'transparent';
+    b.style.color         = active ? '#fff'    : '#64748b';
+    b.style.borderColor   = active ? '#6366f1' : '#334155';
+  });
+  // Appeler le handler stocké
+  const handler = window._evolViewHandlers?.[btnId];
+  if (handler) handler(view);
+};
+
+// ── Helper principal : chart stacké évolution ─────────────────────
+// opts: { donutId, donutColors, getDonutData(monthIdx,evol), toggleBtnId }
 async function _drawEvolChart(canvasId, section, year, colors, opts={}) {
   const evol = await fetch(`${API}/api/pl_section?section=${section}&year=${year}`).then(r=>r.json());
   const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
   const allMonths = evol.months || [];
-  const labels = allMonths.map(m => MONTH_LBL[+m.slice(5,7)-1]);
-  const ctx = document.getElementById(canvasId)?.getContext('2d');
-  if (!ctx || !evol.postes?.length) return null;
+  const labels    = allMonths.map(m => MONTH_LBL[+m.slice(5,7)-1]);
+  const canvasEl  = document.getElementById(canvasId);
+  if (!canvasEl || !evol.postes?.length) return null;
 
-  const datasets = evol.postes.map((poste, i) => ({
-    label: poste, data: evol.by_poste[poste] || [],
-    backgroundColor: colors[i % colors.length], stack: 'stack',
-  }));
-  const nbDs = datasets.length;
+  let currentView = 'eur';
 
-  // Mise à jour donut au clic d'un mois
+  // ── Données selon la vue ──────────────────────────────────────
+  const _getDatasets = (view) => evol.postes.map((p, i) => {
+    const raw = evol.by_poste[p] || new Array(12).fill(0);
+    const data = view === 'pct'
+      ? raw.map((v, mi) => {
+          const tot = evol.postes.reduce((s,p2)=>s+(evol.by_poste[p2]?.[mi]||0), 0);
+          return tot > 0 ? +((v/tot)*100).toFixed(1) : 0;
+        })
+      : raw;
+    return { label:p, data, backgroundColor:colors[i%colors.length], stack:'stack' };
+  });
+
+  // ── Mise à jour donut ─────────────────────────────────────────
   const _updateDonut = (monthIdx) => {
     if (!opts.donutId) return;
     const lbl = labels[monthIdx];
@@ -1782,59 +1813,89 @@ async function _drawEvolChart(canvasId, section, year, colors, opts={}) {
       const {lbls, vals, total, donutColors} = opts.getDonutData(monthIdx, evol);
       _drawDonut(opts.donutId, lbls, vals, total, donutColors||colors, lbl);
     } else {
-      // Par défaut : ventilation par poste de la section
       const vals  = evol.postes.map(p => evol.by_poste[p]?.[monthIdx] || 0);
       const total = vals.reduce((s,v)=>s+v, 0);
       _drawDonut(opts.donutId, evol.postes, vals, total, opts.donutColors||colors, lbl);
     }
   };
 
-  new Chart(ctx, {
-    type:'bar', data:{ labels, datasets },
-    options:{ responsive:true, maintainAspectRatio:false, cursor:'pointer',
-      plugins:{
-        legend:{ display:true, position:'bottom',
-          labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
-        datalabels:{
-          // Afficher le total uniquement sur le dernier dataset (sommet de barre)
-          display: (ctx) => ctx.datasetIndex === nbDs - 1,
-          formatter: (val, ctx) => {
-            const t = ctx.chart.data.datasets.reduce((s,ds)=>s+(+ds.data[ctx.dataIndex]||0),0);
-            if (t === 0) return '';
-            return t>=1000 ? `${(t/1000).toFixed(0)}k€` : `${Math.round(t)}€`;
+  // ── Créer / recréer le chart ──────────────────────────────────
+  let chartInst = null;
+  const _buildChart = (view) => {
+    const existing = Chart.getChart(canvasEl);
+    if (existing) existing.destroy();
+    const ds   = _getDatasets(view);
+    const nbDs = ds.length;
+    const isPct = view === 'pct';
+    chartInst = new Chart(canvasEl.getContext('2d'), {
+      type:'bar', data:{ labels, datasets: ds },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{
+          legend:{ display:true, position:'bottom',
+            labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
+          datalabels:{
+            display: ctx => ctx.datasetIndex === nbDs-1,
+            formatter:(val, ctx) => {
+              const raw = ctx.chart.data.datasets;
+              const t   = raw.reduce((s,d)=>s+(+d.data[ctx.dataIndex]||0), 0);
+              if (t < 0.01) return '';
+              return isPct ? `${Math.round(t)}%` : (t>=1000?`${(t/1000).toFixed(0)}k€`:`${Math.round(t)}€`);
+            },
+            anchor:'end', align:'end', offset:2,
+            color:'#e2e8f0', font:{size:9, weight:'600'},
           },
-          anchor:'end', align:'end', offset:2,
-          color:'#e2e8f0', font:{ size:9, weight:'600' },
-        },
-        tooltip:{ mode:'index', intersect:false,
-          callbacks:{
-            label:  i=>`${i.dataset.label}: ${fmtEur(i.raw)}`,
-            footer: items => `Total : ${fmtEur(items.reduce((s,i)=>s+i.raw,0))}`,
+          tooltip:{ mode:'index', intersect:false,
+            callbacks:{
+              label: i => isPct ? `${i.dataset.label}: ${fmt(i.raw,1)}%` : `${i.dataset.label}: ${fmtEur(i.raw)}`,
+              footer: items => {
+                const t = items.reduce((s,i)=>s+i.raw, 0);
+                return isPct ? `Total : ${Math.round(t)}%` : `Total : ${fmtEur(t)}`;
+              },
+            }
           }
+        },
+        // Clic sur n'importe quel endroit de la colonne → donut du mois
+        onClick:(event) => {
+          if (!opts.donutId) return;
+          const pts = chartInst.getElementsAtEventForMode(event, 'index', {intersect:false}, true);
+          if (pts.length) _updateDonut(pts[0].index);
+        },
+        onHover:(event) => {
+          const pts = chartInst?.getElementsAtEventForMode(event, 'index', {intersect:false}, true);
+          canvasEl.style.cursor = pts?.length ? 'pointer' : 'default';
+        },
+        scales:{
+          x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
+          y:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'},
+            ticks:{ color:'#64748b', font:{size:10},
+              callback: v => isPct ? `${v}%` : (v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`) },
+            beginAtZero:true,
+            max: isPct ? 100 : undefined }
         }
-      },
-      onClick:(event, elements) => {
-        if (!elements.length) return;
-        _updateDonut(elements[0].index);
-      },
-      scales:{
-        x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
-        y:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'},
-          ticks:{color:'#64748b',font:{size:10},callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`},
-          beginAtZero:true }
       }
-    }
-  });
+    });
+  };
 
-  // Initialiser le donut sur le mois courant (ou dernier mois avec données)
+  _buildChart(currentView);
+
+  // Enregistrer le handler pour le toggle €/%
+  if (opts.toggleBtnId) {
+    if (!window._evolViewHandlers) window._evolViewHandlers = {};
+    window._evolViewHandlers[opts.toggleBtnId] = (view) => {
+      currentView = view;
+      _buildChart(view);
+    };
+  }
+
+  // Donut initial sur mois courant (ou dernier mois avec données)
   if (opts.donutId) {
     const curMoStr = (state.selectedMonth||'').slice(0,7);
-    let initIdx = opts.donutInitIdx ?? allMonths.findIndex(m=>m===curMoStr);
+    let initIdx = allMonths.findIndex(m=>m===curMoStr);
     if (initIdx < 0) {
-      // Dernier mois non nul
       initIdx = allMonths.reduce((best, m, i) => {
-        const total = evol.postes.reduce((s,p)=>s+(evol.by_poste[p]?.[i]||0),0);
-        return total>0 ? i : best;
+        const t = evol.postes.reduce((s,p)=>s+(evol.by_poste[p]?.[i]||0), 0);
+        return t>0 ? i : best;
       }, 0);
     }
     _updateDonut(initIdx);
@@ -1856,9 +1917,13 @@ async function renderModalCA(d) {
     ${kpiBlock('MC1', fmtPct(d.mc1_pct))}
   </div>
   <div style="display:grid;grid-template-columns:1fr 260px;gap:20px;margin:16px 0">
-    <div><div class="modal-section" style="margin-bottom:8px">Évolution mensuelle</div>
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="modal-section" style="margin:0">Évolution mensuelle</div>
+        ${_evolToggleHtml('ca-toggle')}
+      </div>
       <div style="position:relative;height:180px"><canvas id="ca-evol-chart"></canvas></div></div>
-    <div><div class="modal-section" style="margin-bottom:8px">Répartition par produit</div>
+    <div><div class="modal-section" style="margin-bottom:8px">Répartition (cliquer un mois)</div>
       <div style="position:relative;height:180px"><canvas id="ca-donut-chart"></canvas></div></div>
   </div>
   <div class="modal-section">Détail par produit</div>
@@ -1870,7 +1935,7 @@ async function renderModalCA(d) {
   document.getElementById('modal-body').innerHTML = html;
 
   try {
-    await _drawEvolChart('ca-evol-chart', 1, year, COLORS_CA, { donutId:'ca-donut-chart', donutColors:COLORS_CA });
+    await _drawEvolChart('ca-evol-chart', 1, year, COLORS_CA, { donutId:'ca-donut-chart', donutColors:COLORS_CA, toggleBtnId:'ca-toggle' });
   } catch(e) { console.error(e); }
 }
 
@@ -1886,11 +1951,14 @@ async function renderModalCharges(d, charges) {
 
   <div style="display:grid;grid-template-columns:1fr 260px;gap:20px;margin:16px 0">
     <div>
-      <div class="modal-section" style="margin-bottom:8px">Évolution mensuelle</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="modal-section" style="margin:0">Évolution mensuelle</div>
+        ${_evolToggleHtml('charges-toggle')}
+      </div>
       <div style="position:relative;height:180px"><canvas id="charges-evol-chart"></canvas></div>
     </div>
     <div>
-      <div class="modal-section" style="margin-bottom:8px">Répartition par pôle</div>
+      <div class="modal-section" style="margin-bottom:8px">Répartition (cliquer un mois)</div>
       <div style="position:relative;height:180px"><canvas id="charges-donut-chart"></canvas></div>
     </div>
   </div>
@@ -1940,48 +2008,73 @@ async function renderModalCharges(d, charges) {
         POLE_SECTIONS.map(s=>POLE_LABELS[s]), vals, tot, POLE_COLORS_ARR, lbl);
     };
 
-    const ctx1 = document.getElementById('charges-evol-chart')?.getContext('2d');
-    if (ctx1) {
-      new Chart(ctx1, {
-        type:'bar', data:{ labels, datasets },
-        options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{
-            legend:{ display:true, position:'bottom',
-              labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
-            datalabels:{
-              display: ctx => ctx.datasetIndex === nbDs-1,
-              formatter:(val,ctx)=>{
-                const t=ctx.chart.data.datasets.reduce((s,ds)=>s+(+ds.data[ctx.dataIndex]||0),0);
-                return t>=1000?`${(t/1000).toFixed(0)}k€`:t?`${Math.round(t)}€`:'';
-              },
-              anchor:'end', align:'end', offset:2,
-              color:'#e2e8f0', font:{size:9,weight:'600'},
-            },
-            tooltip:{ mode:'index', intersect:false,
-              callbacks:{
-                label:i=>`${i.dataset.label}: ${fmtEur(i.raw)}`,
-                footer:items=>`Total : ${fmtEur(items.reduce((s,i)=>s+i.raw,0))}`,
-              }
-            }
-          },
-          onClick:(event, elements)=>{ if(elements.length) _updateChargesDonut(elements[0].index); },
-          scales:{
-            x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
-            y:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'},
-              ticks:{color:'#64748b',font:{size:10},callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`},
-              beginAtZero:true }
-          }
-        }
-      });
+    // Construire un evol "synthétique" par pôle pour passer à _drawEvolChart
+    const synthEvol = {
+      months,
+      postes: POLE_SECTIONS.map(s=>POLE_LABELS[s]),
+      by_poste: Object.fromEntries(allEvol.map((ev, i) => [
+        POLE_LABELS[POLE_SECTIONS[i]],
+        months.map((m, mi) => Object.values(ev.by_poste||{}).reduce((s,arr)=>s+(arr[mi]||0), 0))
+      ]))
+    };
+    // Injecter synthEvol dans _drawEvolChart via getDonutData
+    const canvasEl = document.getElementById('charges-evol-chart');
+    if (canvasEl) {
+      // Utiliser _drawEvolChart directement avec synthEvol pré-chargé
+      const evol = synthEvol;
+      const labels2 = months.map(m => ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'][+m.slice(5,7)-1]);
+      let currentView = 'eur';
+      let chartInst = null;
 
-      // Donut initial : mois courant
+      const _updDonut = (monthIdx) => {
+        const lbl  = labels2[monthIdx];
+        const vals = POLE_SECTIONS.map((_,i) => (synthEvol.by_poste[POLE_LABELS[POLE_SECTIONS[i]]]||[])[monthIdx]||0);
+        const tot  = vals.reduce((s,v)=>s+v,0);
+        _drawDonut('charges-donut-chart', POLE_SECTIONS.map(s=>POLE_LABELS[s]), vals, tot, POLE_COLORS_ARR, lbl);
+      };
+
+      const _buildChargesChart = (view) => {
+        const existing = Chart.getChart(canvasEl);
+        if (existing) existing.destroy();
+        const isPct = view === 'pct';
+        const ds = POLE_SECTIONS.map((s,i) => {
+          const raw = synthEvol.by_poste[POLE_LABELS[s]] || [];
+          const data = isPct ? raw.map((v,mi)=>{ const t=POLE_SECTIONS.reduce((ss,_,j)=>ss+((synthEvol.by_poste[POLE_LABELS[POLE_SECTIONS[j]]]||[])[mi]||0),0); return t>0?+(v/t*100).toFixed(1):0; }) : raw;
+          return { label:POLE_LABELS[s], data, backgroundColor:POLE_COLORS_ARR[i], stack:'stack' };
+        });
+        const nbDs = ds.length;
+        chartInst = new Chart(canvasEl.getContext('2d'), {
+          type:'bar', data:{labels:labels2, datasets:ds},
+          options:{ responsive:true, maintainAspectRatio:false,
+            plugins:{
+              legend:{ display:true, position:'bottom', labels:{color:'#94a3b8',font:{size:9},boxWidth:10,padding:6} },
+              datalabels:{
+                display:ctx=>ctx.datasetIndex===nbDs-1,
+                formatter:(val,ctx)=>{ const t=ctx.chart.data.datasets.reduce((s,d)=>s+(+d.data[ctx.dataIndex]||0),0); return t<0.01?'':(isPct?`${Math.round(t)}%`:(t>=1000?`${(t/1000).toFixed(0)}k€`:`${Math.round(t)}€`)); },
+                anchor:'end',align:'end',offset:2,color:'#e2e8f0',font:{size:9,weight:'600'},
+              },
+              tooltip:{ mode:'index', intersect:false,
+                callbacks:{ label:i=>isPct?`${i.dataset.label}: ${fmt(i.raw,1)}%`:`${i.dataset.label}: ${fmtEur(i.raw)}`, footer:items=>{ const t=items.reduce((s,i)=>s+i.raw,0); return isPct?`Total: ${Math.round(t)}%`:`Total: ${fmtEur(t)}`; } }
+              }
+            },
+            onClick:(event)=>{ if(!chartInst) return; const pts=chartInst.getElementsAtEventForMode(event,'index',{intersect:false},true); if(pts.length) _updDonut(pts[0].index); },
+            onHover:(event)=>{ const pts=chartInst?.getElementsAtEventForMode(event,'index',{intersect:false},true); canvasEl.style.cursor=pts?.length?'pointer':'default'; },
+            scales:{
+              x:{stacked:true,grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10}}},
+              y:{stacked:true,grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10},callback:v=>isPct?`${v}%`:(v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`)},beginAtZero:true,max:isPct?100:undefined}
+            }
+          }
+        });
+      };
+      _buildChargesChart(currentView);
+      if (!window._evolViewHandlers) window._evolViewHandlers = {};
+      window._evolViewHandlers['charges-toggle'] = (view) => { currentView=view; _buildChargesChart(view); };
+
+      // Donut initial
       const curMoStr = (state.selectedMonth||'').slice(0,7);
       let initIdx = months.findIndex(m=>m===curMoStr);
-      if (initIdx<0) initIdx = months.reduce((b,m,i)=>{
-        const t=allEvol.reduce((s,ev)=>s+Object.values(ev.by_poste||{}).reduce((ss,arr)=>ss+(arr[i]||0),0),0);
-        return t>0?i:b;
-      },0);
-      _updateChargesDonut(initIdx);
+      if (initIdx<0) initIdx = months.reduce((b,m,i)=>{ const t=POLE_SECTIONS.reduce((s,_,j)=>s+((synthEvol.by_poste[POLE_LABELS[POLE_SECTIONS[j]]]||[])[i]||0),0); return t>0?i:b; },0);
+      _updDonut(initIdx);
     }
   } catch(e) { console.error(e); }
 }
@@ -2096,11 +2189,14 @@ async function renderModalMC(d, step) {
   <!-- Évolution M/M + Camembert côte à côte -->
   <div style="display:grid;grid-template-columns:1fr 280px;gap:20px;margin:16px 0">
     <div>
-      <div class="modal-section" style="margin-bottom:8px">Évolution mensuelle</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="modal-section" style="margin:0">Évolution mensuelle</div>
+        ${_evolToggleHtml('mc-toggle')}
+      </div>
       <div style="position:relative;height:180px"><canvas id="mc-evol-chart"></canvas></div>
     </div>
     <div>
-      <div class="modal-section" style="margin-bottom:8px">Répartition</div>
+      <div class="modal-section" style="margin-bottom:8px">Répartition (cliquer un mois)</div>
       <div style="position:relative;height:180px"><canvas id="mc-donut-chart"></canvas></div>
     </div>
   </div>
@@ -2116,7 +2212,7 @@ async function renderModalMC(d, step) {
     const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
     const STACK_COLORS = ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#818cf8','#4f46e5','#7c3aed'];
     await _drawEvolChart('mc-evol-chart', section, year, STACK_COLORS,
-      { donutId:'mc-donut-chart', donutColors:STACK_COLORS });
+      { donutId:'mc-donut-chart', donutColors:STACK_COLORS, toggleBtnId:'mc-toggle' });
   } catch(e) { console.error(e); }
 }
 

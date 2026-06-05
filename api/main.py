@@ -418,6 +418,37 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
             "tx_count":         unc_exp_count,
         }
 
+    # ── Flux internes (virements Stripe/GC/CE → compte bancaire) — hors P&L ──
+    _FLUX_INTERNES_CATS = ["Virement interne Stripe", "Virement interne GC", "Virement interne Caisse Epargne"]
+    flux_total, flux_count = 0.0, 0
+    for cat in _FLUX_INTERNES_CATS:
+        pg = 0
+        while True:
+            batch = (
+                sb.table("transactions").select("amount")
+                .gte("date", d_from).lte("date", d_to)
+                .eq("category_name", cat)
+                .range(pg * 1000, (pg + 1) * 1000 - 1).execute().data
+            )
+            for tx in batch:
+                flux_total += abs(float(tx["amount"] or 0))
+                flux_count += 1
+            if len(batch) < 1000:
+                break
+            pg += 1
+
+    if flux_total > 0.5:
+        aggregated["_flux_internes"] = {
+            "poste_budgetaire": "Flux internes (virements trésorerie)",
+            "axe2_pole":        None,
+            "axe3_analytics":   "_flux_internes",
+            "pl_section":       99,   # section fictive — hors P&L, rendu côté frontend
+            "is_revenue":       False,
+            "amount":           round(flux_total, 2),
+            "amount_ht":        round(flux_total, 2),
+            "tx_count":         flux_count,
+        }
+
     return {"month": month, "data": sorted(aggregated.values(), key=lambda x: (x["pl_section"] or 9, x["poste_budgetaire"]))}
 
 

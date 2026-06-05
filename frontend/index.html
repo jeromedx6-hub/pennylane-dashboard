@@ -1347,12 +1347,12 @@ function renderPL(plData, kpis) {
     : r.amount;
 
   // Séparer les lignes spéciales hors P&L
-  const uncategRev = plData.find(r => r.axe3_analytics === '_uncategorized_revenue')
-                  || plData.find(r => r.axe3_analytics === '_uncategorized'); // compat ancien
-  const uncategExp = plData.find(r => r.axe3_analytics === '_uncategorized_expenses');
-  const normalData = plData.filter(r =>
-    !['_uncategorized_revenue','_uncategorized_expenses','_uncategorized'].includes(r.axe3_analytics)
-  );
+  const uncategRev  = plData.find(r => r.axe3_analytics === '_uncategorized_revenue')
+                   || plData.find(r => r.axe3_analytics === '_uncategorized'); // compat ancien
+  const uncategExp  = plData.find(r => r.axe3_analytics === '_uncategorized_expenses');
+  const fluxInternes = plData.find(r => r.axe3_analytics === '_flux_internes');
+  const _SPECIAL_AXE = ['_uncategorized_revenue','_uncategorized_expenses','_uncategorized','_flux_internes'];
+  const normalData  = plData.filter(r => !_SPECIAL_AXE.includes(r.axe3_analytics));
 
   // Grouper par section
   const bySection = {};
@@ -1425,6 +1425,16 @@ function renderPL(plData, kpis) {
         <td class="${cls}">${fmtEur(mc)}</td>
         <td class="${cls}">${fmtPct(mcPcts[s])}</td>
       </tr>`;
+      // Flux internes — affichés en ligne info sous l'EBITDA, hors calcul P&L
+      if (isEbitda && fluxInternes && fluxInternes.amount > 0) {
+        const fiAmt = getAmt(fluxInternes);
+        html += `<tr style="opacity:.65;font-size:11px;border-top:1px solid #1e2340">
+          <td style="color:#64748b;padding-left:14px">↕ Flux internes (virements tréso)
+            <span style="font-size:10px;color:#475569;margin-left:6px">${fluxInternes.tx_count} tx · hors P&L</span></td>
+          <td style="color:#64748b">${fmtEur(fiAmt)}</td>
+          <td style="color:#475569">${fmt(fiAmt/ca*100,1)}%</td>
+        </tr>`;
+      }
     } else if (s === 1) {
       const caLabel = showHt ? 'TOTAL CA HT' : 'TOTAL CA TTC';
       html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(1, '${caLabel}', true)">

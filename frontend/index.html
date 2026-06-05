@@ -424,15 +424,29 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="card" style="margin-bottom:20px">
     <div class="card-header">
       <div>
-        <div class="card-title">CA encaissé · Jour par jour</div>
+        <div class="card-title" id="rev30-chart-title">CA encaissé · Jour par jour</div>
         <div class="card-sub" id="rev30-chart-sub">—</div>
       </div>
-      <button id="btn-avg3m" onclick="toggleAvg3m()" style="
-        background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);
-        color:#a5b4fc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;
-        transition:all .2s;white-space:nowrap">
-        ∼ Moy. 3 mois
-      </button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <!-- Toggle jour/semaine -->
+        <div style="display:flex;background:#12141e;border:1px solid #2d3148;border-radius:6px;overflow:hidden">
+          <button id="btn-view-day" onclick="setRev30View('day')"
+            style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:#6366f1;color:#fff;transition:all .15s">
+            Jour
+          </button>
+          <button id="btn-view-week" onclick="setRev30View('week')"
+            style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:transparent;color:#475569;transition:all .15s">
+            Semaine
+          </button>
+        </div>
+        <!-- Moy. 3 mois -->
+        <button id="btn-avg3m" onclick="toggleAvg3m()" style="
+          background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);
+          color:#a5b4fc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;
+          transition:all .2s;white-space:nowrap">
+          ∼ Moy. 3 mois
+        </button>
+      </div>
     </div>
     <div style="position:relative;height:300px;padding-bottom:8px">
       <canvas id="chart-rev30"></canvas>
@@ -2532,9 +2546,38 @@ function renderReleaseNotes(notes) {
 }
 
 // ── KPI Revenue ───────────────────────────────────────────────
-let rev30Data  = null;
-let chartRev30 = null;
-let rev30Mode  = 'rolling'; // 'rolling' | 'month'
+let rev30Data    = null;
+let chartRev30   = null;
+let rev30Mode    = 'rolling'; // 'rolling' | 'month'
+let rev30View    = 'day';     // 'day' | 'week'
+
+function setRev30View(view) {
+  rev30View = view;
+  document.getElementById('btn-view-day').style.background  = view === 'day'  ? '#6366f1' : 'transparent';
+  document.getElementById('btn-view-day').style.color       = view === 'day'  ? '#fff' : '#475569';
+  document.getElementById('btn-view-week').style.background = view === 'week' ? '#6366f1' : 'transparent';
+  document.getElementById('btn-view-week').style.color      = view === 'week' ? '#fff' : '#475569';
+  const titleEl = document.getElementById('rev30-chart-title');
+  if (titleEl) titleEl.textContent = view === 'week' ? 'CA encaissé · Semaine par semaine' : 'CA encaissé · Jour par jour';
+  if (rev30Data) renderRev30Chart(rev30Data);
+}
+
+// Regroupe les données daily en semaines ISO (lundi → dimanche)
+function _groupByWeek(dailyArr) {
+  const weeks = {};
+  for (const d of dailyArr) {
+    const dt  = new Date(d.date + 'T12:00:00');
+    // Lundi de la semaine
+    const day = dt.getDay() === 0 ? 6 : dt.getDay() - 1; // 0=lun … 6=dim
+    const mon = new Date(dt); mon.setDate(dt.getDate() - day);
+    const key = mon.toISOString().slice(0, 10);
+    if (!weeks[key]) weeks[key] = { date: key, ca: 0, tx_count: 0, end: key };
+    weeks[key].ca       += d.ca;
+    weeks[key].tx_count += d.tx_count || 0;
+    weeks[key].end = d.date;
+  }
+  return Object.values(weeks).sort((a, b) => a.date.localeCompare(b.date));
+}
 
 function initRev30() {
   const sel = document.getElementById('rev30-month-select');
@@ -2656,19 +2699,26 @@ function renderRev30(data) {
       <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">sans mapping P&L</span></div>
     </div>`;
 
-  // Histogramme
-  const labels = data.daily.map(d => {
+  // Regroupement jour ou semaine
+  const isWeek  = rev30View === 'week';
+  const points  = isWeek ? _groupByWeek(data.daily) : data.daily;
+
+  const labels = points.map(d => {
     const [,m,dd] = d.date.split('-');
+    if (isWeek) {
+      const [,me,de] = d.end.split('-');
+      return `${+dd}/${m}–${+de}/${me}`;
+    }
     return `${+dd}/${m}`;
   });
-  const values = data.daily.map(d => d.ca);
-  const colors = values.map(v => v > 0 ? 'rgba(99,102,241,0.75)' : 'rgba(248,113,113,0.5)');
+  const values  = points.map(d => d.ca);
+  const colors  = values.map(v => v > 0 ? 'rgba(99,102,241,0.75)' : 'rgba(248,113,113,0.5)');
   const borders = values.map(v => v > 0 ? '#6366f1' : '#f87171');
 
-  // Ligne moyenne 3 mois si active
-  const avgData = _avg3mActive && _avg3mData
+  // Ligne moyenne 3 mois (uniquement en vue jour)
+  const avgData = (!isWeek && _avg3mActive && _avg3mData)
     ? data.daily.map(d => {
-        const dayNum = d.date.slice(8, 10); // "07"
+        const dayNum = d.date.slice(8, 10);
         return _avg3mData.avg_by_day[dayNum] ?? null;
       })
     : null;
@@ -2718,16 +2768,24 @@ function renderRev30(data) {
         tooltip: {
           callbacks: {
             title: items => {
-              const d = data.daily[items[0].dataIndex];
-              return new Date(d.date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
+              const pt = points[items[0].dataIndex];
+              if (isWeek) {
+                const s = new Date(pt.date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
+                const e = new Date(pt.end  + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
+                return `Semaine du ${s} au ${e}`;
+              }
+              return new Date(pt.date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
             },
             label: item => {
               if (item.dataset.label === 'Moy. 3 mois') return `Moy. 3 mois : ${fmtEur(item.raw)}`;
-              const diff = avgData ? item.raw - (avgData[item.dataIndex] ?? 0) : null;
-              const sign = diff >= 0 ? '+' : '';
-              return diff !== null
-                ? [`CA : ${fmtEur(item.raw)}`, `vs moy. : ${sign}${fmtEur(diff)}`]
-                : `CA : ${fmtEur(item.raw)}`;
+              const pt = points[item.dataIndex];
+              const lines = [`CA : ${fmtEur(item.raw)}`];
+              if (isWeek && pt.tx_count) lines.push(`${pt.tx_count} transaction${pt.tx_count>1?'s':''}`);
+              if (!isWeek && avgData) {
+                const diff = item.raw - (avgData[item.dataIndex] ?? 0);
+                lines.push(`vs moy. : ${diff>=0?'+':''}${fmtEur(diff)}`);
+              }
+              return lines;
             }
           }
         }

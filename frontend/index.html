@@ -1757,22 +1757,110 @@ function renderModalCA(d) {
   document.getElementById('modal-body').innerHTML = html;
 }
 
-function renderModalCharges(d, charges) {
+async function renderModalCharges(d, charges) {
   const items = (charges && charges.data) || [];
+  const total = items.reduce((s,i)=>s+i.amount, 0);
+
   let html = `<div class="modal-kpi-row">
     ${kpiBlock('Total charges', fmtEur(d.total_charges))}
     ${kpiBlock('Acquisition', fmtEur(d.total_acquisition))}
     ${kpiBlock('Structure', fmtEur(d.total_structure))}
   </div>
-  <div class="modal-section">Répartition par pôle</div>
+
+  <div style="display:grid;grid-template-columns:1fr 260px;gap:20px;margin:16px 0">
+    <div>
+      <div class="modal-section" style="margin-bottom:8px">Évolution mensuelle</div>
+      <div style="position:relative;height:180px"><canvas id="charges-evol-chart"></canvas></div>
+    </div>
+    <div>
+      <div class="modal-section" style="margin-bottom:8px">Répartition par pôle</div>
+      <div style="position:relative;height:180px"><canvas id="charges-donut-chart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="modal-section">Détail par pôle</div>
   <table class="detail-table"><thead><tr><th>Pôle</th><th>Montant</th><th>% charges</th></tr></thead><tbody>`;
 
   for (const item of items) {
-    html += `<tr><td>${item.pole}</td><td>${fmtEur(item.amount)}</td><td>${item.pct}%</td></tr>`;
+    html += `<tr><td>${item.pole}</td><td class="negative">— ${fmtEur(item.amount)}</td><td>${item.pct}%</td></tr>`;
   }
-  const total = items.reduce((s,i)=>s+i.amount, 0);
-  html += `<tr><td>TOTAL</td><td>${fmtEur(total)}</td><td>100%</td></tr></tbody></table>`;
+  html += `<tr style="font-weight:700"><td>TOTAL</td><td class="negative">— ${fmtEur(total)}</td><td>100%</td></tr></tbody></table>`;
   document.getElementById('modal-body').innerHTML = html;
+
+  // ── Évolution mensuelle total charges (stacké par pôle) ──────
+  try {
+    const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
+    const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+    const POLE_SECTIONS = [2,3,4,5];
+    const POLE_LABELS   = {2:'Acquisition',3:'Sales & Closing',4:'Opérationnel',5:'Structure'};
+    const POLE_COLORS   = {2:'#60a5fa',3:'#a78bfa',4:'#4ade80',5:'#fb923c'};
+
+    const allEvol = await Promise.all(
+      POLE_SECTIONS.map(s => fetch(`${API}/api/pl_section?section=${s}&year=${year}`).then(r=>r.json()))
+    );
+
+    const months = allEvol[0].months || [];
+    const labels = months.map(m => MONTH_LBL[+m.slice(5,7)-1]);
+    const curMo  = (state.selectedMonth||'').slice(5,7);
+
+    const ctx1 = document.getElementById('charges-evol-chart')?.getContext('2d');
+    if (ctx1) {
+      const datasets = allEvol.map((evol, i) => {
+        const s = POLE_SECTIONS[i];
+        const monthlyTotals = months.map(m => {
+          // sommer tous les postes de cette section pour ce mois
+          return Object.values(evol.by_poste || {}).reduce((sum, arr) => {
+            const idx = (evol.months||[]).indexOf(m);
+            return sum + (idx >= 0 ? (arr[idx] || 0) : 0);
+          }, 0);
+        });
+        return {
+          label: POLE_LABELS[s],
+          data:  monthlyTotals,
+          backgroundColor: POLE_COLORS[s],
+          stack: 'stack',
+        };
+      });
+      new Chart(ctx1, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: { responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ display:true, position:'bottom',
+            labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
+            datalabels:{display:false},
+            tooltip:{ mode:'index', intersect:false,
+              callbacks:{ label: i=>`${i.dataset.label}: ${fmtEur(i.raw)}` } }
+          },
+          scales:{
+            x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
+            y:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'},
+              ticks:{color:'#64748b',font:{size:10},callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`},
+              beginAtZero:true }
+          }
+        }
+      });
+    }
+  } catch(e) { console.error(e); }
+
+  // ── Donut répartition par pôle ───────────────────────────────
+  if (items.length) {
+    const ctx2 = document.getElementById('charges-donut-chart')?.getContext('2d');
+    const COLORS = ['#60a5fa','#a78bfa','#4ade80','#fb923c','#f59e0b','#e879f9'];
+    if (ctx2) new Chart(ctx2, {
+      type: 'doughnut',
+      data: {
+        labels: items.map(i=>i.pole),
+        datasets:[{ data: items.map(i=>i.amount),
+          backgroundColor: items.map((_,i)=>COLORS[i%COLORS.length]),
+          borderWidth:0 }]
+      },
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'60%',
+        plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', font:{size:10}, boxWidth:10, padding:6 } },
+          datalabels:{display:false},
+          tooltip:{ callbacks:{ label: i=>`${i.label}: ${fmtEur(i.raw)} (${fmt(i.raw/total*100,1)}%)` } } }
+      }
+    });
+  }
 }
 
 function renderModalEbitda(d) {

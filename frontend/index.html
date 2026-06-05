@@ -1380,9 +1380,11 @@ function renderPL(plData, kpis) {
   let html = '';
   for (const s of [1,2,3,4,5]) {
     const rows = bySection[s] || [];
-    if (!rows.length) continue;
+    // Section 5 : toujours affichée (EBITDA + flux internes) même si vide
+    if (!rows.length && s !== 5) continue;
 
-    html += `<tr class="section-header"><td colspan="3">${SECTION_LABELS[s]}</td></tr>`;
+    if (rows.length)
+      html += `<tr class="section-header"><td colspan="3">${SECTION_LABELS[s]}</td></tr>`;
     for (const r of rows.sort((a,b)=>Math.abs(getAmt(b))-Math.abs(getAmt(a)))) {
       const amt = getAmt(r);
       const pct = fmt(Math.abs(amt)/ca*100, 1);

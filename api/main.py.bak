@@ -175,58 +175,6 @@ def _startup_auto_sync():
 threading.Thread(target=_startup_auto_sync, daemon=True).start()
 
 
-# ── Cron interne toutes les heures ────────────────────────────────────────────
-def _hourly_cron():
-    """
-    Tourne en permanence en background (toutes les heures).
-    Si le dernier sync date de plus de 23h, lance un sync automatique.
-    Robuste même si Railway ne redémarre pas le service.
-    """
-    import time
-    while True:
-        time.sleep(3600)  # attendre 1h avant chaque vérification
-        try:
-            meta = sb.table("sync_meta").select("value").eq("key", "last_synced_at").execute().data
-            if meta:
-                last = _dt.fromisoformat(meta[0]["value"].rstrip("Z"))
-                age_hours = (_dt.utcnow() - last).total_seconds() / 3600
-                if age_hours < 23:
-                    continue  # sync récent, rien à faire
-                logging.info(f"Cron horaire: dernier sync il y a {age_hours:.1f}h — déclenchement")
-            else:
-                logging.info("Cron horaire: pas de last_synced_at — déclenchement")
-
-            with _sync_lock:
-                if _sync_state["running"]:
-                    continue
-                today  = date.today()
-                d_from = today - timedelta(days=7)
-                d_to   = today
-                _sync_state.update({
-                    "running": True, "started_at": _dt.now().strftime("%H:%M:%S"),
-                    "finished_at": None, "error": None,
-                    "date_from": d_from.isoformat(), "date_to": d_to.isoformat(),
-                })
-
-            import sync as _sync_mod
-            try:
-                audit = _sync_mod.run(d_from, d_to)
-                with _sync_lock:
-                    _sync_state.update({"running": False,
-                                        "finished_at": _dt.now().strftime("%H:%M:%S"),
-                                        "audit": audit})
-                logging.info("Cron horaire: sync terminé avec succès")
-            except Exception as e:
-                with _sync_lock:
-                    _sync_state.update({"running": False, "error": str(e),
-                                        "finished_at": _dt.now().strftime("%H:%M:%S")})
-                logging.error(f"Cron horaire: sync échoué — {e}")
-        except Exception as e:
-            logging.warning(f"Cron horaire: erreur — {e}")
-
-threading.Thread(target=_hourly_cron, daemon=True).start()
-
-
 def _month_range(month: str) -> tuple[str, str]:
     """'2025-05' → ('2025-05-01', '2025-05-31')"""
     y, m = int(month[:4]), int(month[5:7])
@@ -305,11 +253,6 @@ def get_kpis(month: str = Query(default=None), ytd: bool = Query(default=False))
         "mc2_pct":           pct(s("mc2")),
         "marge_brute":       round(s("marge_brute"), 2),
         "marge_brute_pct":   pct(s("marge_brute")),
-        # Taux de coût par pôle = dépenses / CA
-        "acq_pct":           pct(s("total_acquisition")),
-        "sales_pct":         pct(s("total_sales")),
-        "ops_pct":           pct(s("total_ops")),
-        "structure_pct":     pct(s("total_structure")),
         "ebitda":            round(s("ebitda"), 2),
         "ebitda_pct":        pct(s("ebitda")),
         "roas_cash":         roas,
@@ -332,7 +275,7 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
 
     rows = (
         sb.table("pl_daily")
-        .select("poste_budgetaire, axe2_pole, axe3_analytics, pl_section, is_revenue, amount, amount_ht, tx_count")
+        .select("poste_budgetaire, axe2_pole, axe3_analytics, pl_section, is_revenue, amount, tx_count")
         .gte("date", d_from)
         .lte("date", d_to)
         .execute()
@@ -350,12 +293,10 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
                 "pl_section":       r["pl_section"],
                 "is_revenue":       r["is_revenue"],
                 "amount":           0,
-                "amount_ht":        0,
                 "tx_count":         0,
             }
-        aggregated[key]["amount"]    += float(r["amount"] or 0)
-        aggregated[key]["amount_ht"] += float(r.get("amount_ht") or r["amount"] or 0)
-        aggregated[key]["tx_count"]  += int(r["tx_count"] or 0)
+        aggregated[key]["amount"]   += float(r["amount"] or 0)
+        aggregated[key]["tx_count"] += int(r["tx_count"] or 0)
 
     # ── Encaissements non catégorisés (crédits category='Revenu', hors P&L CA) ──
     unc_rev_total, unc_rev_count = 0.0, 0
@@ -382,7 +323,6 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
             "pl_section":       1,
             "is_revenue":       True,
             "amount":           round(unc_rev_total, 2),
-            "amount_ht":        round(unc_rev_total / 1.20, 2),
             "tx_count":         unc_rev_count,
         }
 
@@ -411,7 +351,6 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
             "pl_section":       5,
             "is_revenue":       False,
             "amount":           round(unc_exp_total, 2),
-            "amount_ht":        round(unc_exp_total / 1.20, 2),
             "tx_count":         unc_exp_count,
         }
 
@@ -422,9 +361,9 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
 def get_uncategorized_detail(
     month: str = Query(default=None),
     ytd:   bool = Query(default=False),
-    type:  str  = Query(default="revenue"),   # "revenue" | "expenses" | "all"
+    type:  str  = Query(default="revenue"),   # "revenue" | "expenses"
 ):
-    """Détail des transactions non catégorisées avec suggestions depuis label_category_rules."""
+    """Détail des transactions non catégorisées (pour modal drill-down + export)."""
     today = date.today()
     if ytd:
         d_from = f"{today.year}-01-01"
@@ -433,25 +372,12 @@ def get_uncategorized_detail(
         month  = month or today.strftime("%Y-%m")
         d_from, d_to = _month_range(month)
 
-    # Charger les règles de suggestion une fois
-    rules = sb.table("label_category_rules").select("pattern,category_name").execute().data
-    # Charger toutes les catégories disponibles pour le select
-    all_categories = [r["pennylane_category_name"]
-                      for r in sb.table("category_mapping").select("pennylane_category_name").execute().data]
-
-    def _suggest(label: str) -> str:
-        """Retourne la catégorie suggérée si un pattern matche le libellé."""
-        lbl_lower = (label or "").lower()
-        for rule in rules:
-            if rule["pattern"].lower() in lbl_lower:
-                return rule["category_name"]
-        return ""
-
     def _fetch_all(extra_filters: list) -> list:
+        """Paginate a query built with a list of (method, *args) filter calls."""
         out, pg = [], 0
         while True:
             q = (sb.table("transactions")
-                 .select("id,date,label,amount,direction,category_name,third_party")
+                 .select("date,label,amount,direction,category_name,third_party")
                  .gte("date", d_from).lte("date", d_to)
                  .order("date", desc=True))
             for method, *args in extra_filters:
@@ -464,219 +390,16 @@ def get_uncategorized_detail(
         return out
 
     if type == "revenue":
-        rows = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "credit")])
+        rows = _fetch_all([("eq", "category_name", "Revenu"), ("eq", "direction", "credit")])
     elif type == "expenses":
         rows = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "debit")])
     else:  # "all"
-        rev  = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "credit")])
+        rev  = _fetch_all([("eq", "category_name", "Revenu"), ("eq", "direction", "credit")])
         exp  = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "debit")])
         rows = sorted(rev + exp, key=lambda r: r["date"], reverse=True)
 
-    # Enrichir avec suggestion
-    for r in rows:
-        r["suggested_category"] = _suggest(r.get("label", ""))
-
     total = sum(float(r["amount"] or 0) * (1 if r["direction"] == "credit" else -1) for r in rows)
-    return {
-        "type":           type,
-        "data":           rows,
-        "total":          round(total, 2),
-        "count":          len(rows),
-        "all_categories": sorted(all_categories),
-    }
-
-
-@app.post("/api/transactions/ai-suggest")
-def ai_suggest_categories(body: dict):
-    """
-    Utilise Claude pour suggérer une catégorie sur une liste de transactions non catégorisées.
-    Entrée : { transactions: [{id, label, amount, direction, date}, ...] }
-    Sortie : { suggestions: [{id, suggested_category, confidence}, ...] }
-    Ponctuel — ne modifie rien en DB, retourne juste les suggestions.
-    """
-    try:
-        import anthropic as _anthropic
-    except ImportError:
-        return {"status": "error", "detail": "Package anthropic non installé"}
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"status": "error", "detail": "ANTHROPIC_API_KEY manquante"}
-
-    transactions = body.get("transactions", [])
-    if not transactions:
-        return {"suggestions": []}
-
-    # Charger la liste des catégories disponibles
-    cats = sb.table("category_mapping").select("pennylane_category_name,poste_budgetaire,pl_section").execute().data
-    cat_list = sorted({r["pennylane_category_name"] for r in cats})
-
-    # Construire le prompt
-    tx_lines = "\n".join(
-        f'- id={t["id"]} | {t["date"]} | {t["direction"]} | {float(t["amount"]):.2f}€ | "{t["label"]}"'
-        for t in transactions
-    )
-    cat_lines = "\n".join(f"  - {c}" for c in cat_list)
-
-    prompt = f"""Tu es un comptable expert en catégorisation de transactions bancaires pour une entreprise de formation en ligne (infopreneuriat).
-
-Voici les catégories disponibles dans le plan comptable :
-{cat_lines}
-
-Pour chaque transaction ci-dessous, retourne la catégorie la plus adaptée parmi la liste ci-dessus.
-Si aucune catégorie ne convient, retourne une chaîne vide "".
-
-Règles importantes :
-- "payment_paid_out" ou "payment_paid" dans le libellé = encaissement client (revenue)
-- "gocardless_fee" ou "surcharge" = Frais transactions
-- "Stripe Payout" ou "STRIPE TECHNOLOGY" sans "Charge:" = Virement interne Stripe
-- "Qonto" = Frais bancaires ou Logiciel Structure
-- "Automatic Taxes" = TVA décaissée
-- "Charge:" + nom de formation = revenue correspondant à cette formation
-
-Transactions :
-{tx_lines}
-
-Réponds UNIQUEMENT en JSON valide, format exact :
-{{"suggestions": [{{"id": "...", "category": "...", "confidence": "high|medium|low"}}]}}"""
-
-    client = _anthropic.Anthropic(api_key=api_key)
-    msg = client.messages.create(
-        model="claude-3-5-haiku-20241022",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = msg.content[0].text.strip()
-    # Extraire le JSON même si Claude ajoute du texte autour
-    import re as _re
-    match = _re.search(r'\{.*\}', raw, _re.DOTALL)
-    if not match:
-        return {"status": "error", "detail": "Réponse IA non parseable", "raw": raw[:200]}
-
-    result = json.loads(match.group())
-    return {"status": "ok", "suggestions": result.get("suggestions", []), "model": "claude-3-5-haiku"}
-
-
-@app.post("/api/transactions/approve-all")
-def approve_all_categories(body: dict):
-    """
-    Valide en batch toutes les suggestions fournies.
-    Entrée : { items: [{id, label, date, category_name}, ...] }
-    Applique approve_category sur chacun silencieusement.
-    """
-    items = body.get("items", [])
-    if not items:
-        return {"status": "ok", "validated": 0}
-
-    validated = 0
-    errors    = []
-    dates_to_recompute = set()
-
-    for item in items:
-        tx_id    = item.get("id")
-        cat      = (item.get("category_name") or "").strip()
-        label    = (item.get("label") or "").strip()
-        tx_date  = (item.get("date") or "").strip()
-        if not tx_id or not cat:
-            continue
-        try:
-            sb.table("transactions").update({
-                "category_name":   cat,
-                "manually_mapped": True,
-            }).eq("id", tx_id).execute()
-
-            # Règle de suggestion
-            if label:
-                existing = sb.table("label_category_rules").select("id,validated_count").eq("pattern", label).execute().data
-                if existing:
-                    sb.table("label_category_rules").update({
-                        "category_name":   cat,
-                        "validated_count": existing[0]["validated_count"] + 1,
-                    }).eq("pattern", label).execute()
-                else:
-                    sb.table("label_category_rules").insert({
-                        "pattern": label, "category_name": cat, "validated_count": 1
-                    }).execute()
-
-            if tx_date:
-                dates_to_recompute.add(tx_date)
-            validated += 1
-        except Exception as e:
-            errors.append({"id": tx_id, "error": str(e)})
-
-    # Recalculer P&L pour les dates concernées
-    try:
-        import sync as _sync_mod
-        for d in dates_to_recompute:
-            d_obj = date.fromisoformat(d)
-            _sync_mod.recompute_day(d_obj)
-    except Exception as e:
-        logging.warning(f"approve-all recompute: {e}")
-
-    return {"status": "ok", "validated": validated, "errors": errors, "dates": list(dates_to_recompute)}
-
-
-@app.post("/api/transactions/{tx_id}/approve-category")
-def approve_category(tx_id: str, body: dict):
-    """
-    Valide manuellement une catégorie pour une transaction non catégorisée.
-    - Écrit category_name + manually_mapped=True en Supabase
-    - Ajoute/incrémente la règle dans label_category_rules
-    - Recalcule pl_daily + kpis pour la date concernée
-    """
-    category_name = (body.get("category_name") or "").strip()
-    label         = (body.get("label") or "").strip()
-    tx_date       = (body.get("date") or "").strip()
-
-    if not category_name:
-        return {"status": "error", "detail": "category_name requis"}
-
-    try:
-        # 1. Mettre à jour la transaction
-        sb.table("transactions").update({
-            "category_name":  category_name,
-            "manually_mapped": True,
-        }).eq("id", tx_id).execute()
-
-        # 2. Ajouter/incrémenter la règle de suggestion (pattern = label complet)
-        if label:
-            # Chercher si une règle existe déjà avec ce pattern exact
-            existing = sb.table("label_category_rules").select("id,validated_count").eq("pattern", label).execute().data
-            if existing:
-                sb.table("label_category_rules").update({
-                    "category_name":   category_name,
-                    "validated_count": existing[0]["validated_count"] + 1,
-                }).eq("pattern", label).execute()
-            else:
-                sb.table("label_category_rules").insert({
-                    "pattern":       label,
-                    "category_name": category_name,
-                }).execute()
-
-        # 3. Recalcul pl_daily + kpis pour la date concernée
-        if tx_date:
-            try:
-                import sys, importlib
-                if "sync" in sys.modules:
-                    _sync_mod = importlib.reload(sys.modules["sync"])
-                else:
-                    import sync as _sync_mod
-                mapping = {r["pennylane_category_name"]: r
-                           for r in sb.table("category_mapping").select("*").execute().data}
-                cat_families = {r["label"]: (r.get("family_label") or "")
-                                for r in sb.table("pennylane_categories").select("label,family_label").execute().data}
-                from datetime import date as _date
-                d = _date.fromisoformat(tx_date)
-                _sync_mod.compute_pl_daily(sb, mapping, d, cat_families=cat_families)
-                _sync_mod.compute_kpis(sb, d)
-            except Exception as e:
-                logging.warning(f"  approve_category recompute failed: {e}")
-
-        return {"status": "ok", "tx_id": tx_id, "category_name": category_name}
-    except Exception as e:
-        logging.error(f"approve_category: {e}")
-        return {"status": "error", "detail": str(e)}
+    return {"type": type, "data": rows, "total": round(total, 2), "count": len(rows)}
 
 
 @app.get("/api/evolution")
@@ -797,7 +520,7 @@ def get_pl_line_transactions(poste: str = Query(...), year: str = Query(default=
     while page < 20:
         batch = (
             sb.table("transactions")
-            .select("date, label, amount, direction, account_name, category_name, manually_mapped")
+            .select("date, label, amount, direction, account_name, category_name")
             .gte("date", d_from)
             .order("date", desc=False)
             .range(page * size, (page + 1) * size - 1)
@@ -1270,10 +993,10 @@ def recompute_pl(date_from: str = Query(default=None), date_to: str = Query(defa
     """
     try:
         import sys, importlib
-        if "sync" in sys.modules:
-            _sync_mod = importlib.reload(sys.modules["sync"])
+        if "sync.sync" in sys.modules:
+            _sync_mod = importlib.reload(sys.modules["sync.sync"])
         else:
-            import sync as _sync_mod
+            import sync.sync as _sync_mod
 
         from datetime import date as _date, timedelta
         today  = _date.today()
@@ -1298,64 +1021,6 @@ def recompute_pl(date_from: str = Query(default=None), date_to: str = Query(defa
         return {"status": "ok", "days_recomputed": count, "date_from": d_from.isoformat(), "date_to": d_to.isoformat()}
     except Exception as e:
         logging.error(f"recompute_pl: {e}")
-        return {"status": "error", "detail": str(e)}
-
-
-@app.post("/api/sync/backfill-ht")
-def backfill_ht():
-    """
-    Recalcule amount_ht pour toutes les transactions existantes en base
-    depuis category_mapping.tva_rate.
-    Groupe par valeur amount_ht exacte et fait un PATCH par groupe (rapide).
-    """
-    try:
-        import requests as _req
-        from collections import defaultdict
-
-        mapping = {r["pennylane_category_name"]: float(r.get("tva_rate") or 0.20)
-                   for r in sb.table("category_mapping").select("pennylane_category_name,tva_rate").execute().data}
-
-        # Fetch toutes les transactions
-        all_txs, page, size = [], 0, 1000
-        while True:
-            batch = (sb.table("transactions").select("id,amount,category_name")
-                     .range(page * size, (page + 1) * size - 1).execute().data)
-            all_txs.extend(batch)
-            if len(batch) < size:
-                break
-            page += 1
-
-        # Grouper par amount_ht exact (évite N requêtes individuelles)
-        ht_to_ids: dict = defaultdict(list)
-        for tx in all_txs:
-            cat  = tx.get("category_name") or ""
-            rate = mapping.get(cat, 0.20)
-            amt  = abs(float(tx.get("amount") or 0))
-            ht   = round(amt / (1 + rate), 2) if rate > 0 else amt
-            ht_to_ids[ht].append(tx["id"])
-
-        supa_url = os.environ["SUPABASE_URL"]
-        supa_key = os.environ["SUPABASE_KEY"]
-        patch_headers = {
-            "apikey": supa_key, "Authorization": f"Bearer {supa_key}",
-            "Content-Type": "application/json", "Prefer": "return=minimal"
-        }
-
-        updated = 0
-        for ht_val, ids in ht_to_ids.items():
-            ids_csv = ",".join(ids)
-            r = _req.patch(
-                f"{supa_url}/rest/v1/transactions?id=in.({ids_csv})",
-                headers=patch_headers,
-                json={"amount_ht": ht_val}
-            )
-            if r.status_code in (200, 204):
-                updated += len(ids)
-
-        logging.info(f"backfill_ht: {updated} transactions mises à jour")
-        return {"status": "ok", "transactions_updated": updated, "total": len(all_txs)}
-    except Exception as e:
-        logging.error(f"backfill_ht: {e}")
         return {"status": "error", "detail": str(e)}
 
 
@@ -1721,71 +1386,6 @@ def get_revenue_30d(month: str = Query(default=None)):
     panier_moyen = total_ca / rev_tx_count if rev_tx_count > 0 else 0.0
     daily_series = [{"date": d, "ca": round(daily_map.get(d, 0.0), 2)} for d in day_range]
 
-    # ── Référence 90 jours antérieurs ──────────────────────────────
-    # Mode mois : 3 mois précédents complets
-    # Mode 30j glissants : les 90 jours qui précèdent d_from
-    if month:
-        # 3 mois précédents → on ramène un total "même durée" = moyenne mensuelle × 1
-        ref_months = []
-        y_r, m_r = int(month[:4]), int(month[5:7])
-        for delta in [1, 2, 3]:
-            pm = m_r - delta
-            py = y_r
-            while pm <= 0:
-                pm += 12; py -= 1
-            ref_months.append(f"{py:04d}-{pm:02d}")
-        ref_ca_list = []
-        ref_rmb_list = []
-        ref_panier_list = []
-        for rm in ref_months:
-            rf, rt = _month_range(rm)
-            rrows = sb.table("kpis_daily").select("ca_ht").gte("date", rf).lte("date", rt).execute().data
-            rc = sum(float(r["ca_ht"] or 0) for r in rrows)
-            ref_ca_list.append(rc)
-            # remboursements + panier sur ce mois
-            rtx_page, rtxs = 0, []
-            while True:
-                b = (sb.table("transactions").select("amount,direction,category_name")
-                     .gte("date", rf).lte("date", rt)
-                     .range(rtx_page*1000,(rtx_page+1)*1000-1).execute().data)
-                rtxs.extend(b); rtx_page += 1
-                if len(b) < 1000: break
-            rrmb, rcnt = 0.0, 0
-            for tx in rtxs:
-                cat = tx.get("category_name") or ""
-                amt = float(tx.get("amount") or 0)
-                if tx.get("direction") == "debit" and cat in cat_set: rrmb += amt
-                if tx.get("direction") == "credit" and cat in cat_set: rcnt += 1
-            ref_rmb_list.append(rrmb)
-            ref_panier_list.append(rc / rcnt if rcnt > 0 else 0.0)
-        ref_ca      = round(sum(ref_ca_list) / 3, 2)      # moyenne mensuelle
-        ref_rmb     = round(sum(ref_rmb_list) / 3, 2)
-        ref_panier  = round(sum(ref_panier_list) / 3, 2)
-        ref_label   = f"moy. {ref_months[2][5:7]}-{ref_months[0][5:7]}/{ref_months[0][:4]}"
-    else:
-        # 90 jours glissants avant d_from
-        ref_to   = (date.fromisoformat(d_from) - timedelta(days=1)).isoformat()
-        ref_from = (date.fromisoformat(d_from) - timedelta(days=90)).isoformat()
-        rrows    = sb.table("kpis_daily").select("ca_ht").gte("date", ref_from).lte("date", ref_to).execute().data
-        ref_ca_90 = sum(float(r["ca_ht"] or 0) for r in rrows)
-        ref_ca   = round(ref_ca_90 / 3, 2)   # ramené à 30j pour comparaison
-        rtx_page, rtxs = 0, []
-        while True:
-            b = (sb.table("transactions").select("amount,direction,category_name")
-                 .gte("date", ref_from).lte("date", ref_to)
-                 .range(rtx_page*1000,(rtx_page+1)*1000-1).execute().data)
-            rtxs.extend(b); rtx_page += 1
-            if len(b) < 1000: break
-        rrmb, rcnt = 0.0, 0
-        for tx in rtxs:
-            cat = tx.get("category_name") or ""
-            amt = float(tx.get("amount") or 0)
-            if tx.get("direction") == "debit" and cat in cat_set: rrmb += amt
-            if tx.get("direction") == "credit" and cat in cat_set: rcnt += 1
-        ref_rmb    = round(rrmb / 3, 2)
-        ref_panier = round((ref_ca_90 / 3) / (rcnt / 3) if rcnt > 0 else 0.0, 2)
-        ref_label  = "moy. 90j précédents"
-
     return {
         "period": {"from": d_from, "to": d_to},
         "kpis": {
@@ -1794,51 +1394,8 @@ def get_revenue_30d(month: str = Query(default=None)):
             "panier_moyen":    round(panier_moyen, 2),
             "tx_non_traitees": untreated,
         },
-        "ref": {
-            "ca_total":       ref_ca,
-            "remboursements": ref_rmb,
-            "panier_moyen":   ref_panier,
-            "label":          ref_label,
-        },
         "daily": daily_series,
     }
-
-
-@app.get("/api/revenue_avg3m")
-def get_revenue_avg3m(month: str = Query(default=None)):
-    """
-    Retourne la moyenne journalière de CA sur les 3 mois précédant `month` (ou mois courant).
-    Format : {"avg_by_day": {"01": 3200.0, "02": 2100.0, ...}, "monthly_avg": 180000.0}
-    """
-    today = date.today()
-    if month:
-        y, m_int = int(month[:4]), int(month[5:7])
-    else:
-        y, m_int = today.year, today.month
-
-    # 3 mois précédents
-    months_data = {}
-    for delta in [1, 2, 3]:
-        pm = m_int - delta
-        py = y
-        while pm <= 0:
-            pm += 12
-            py -= 1
-        d_from, d_to = _month_range(f"{py:04d}-{pm:02d}")
-        rows = (
-            sb.table("kpis_daily")
-            .select("date,ca_ht")
-            .gte("date", d_from)
-            .lte("date", d_to)
-            .execute().data
-        )
-        for r in rows:
-            day_num = r["date"][8:10]  # "01" .. "31"
-            months_data.setdefault(day_num, []).append(float(r["ca_ht"] or 0))
-
-    avg_by_day = {day: round(sum(vals) / len(vals), 2) for day, vals in months_data.items()}
-    monthly_avg = round(sum(avg_by_day.values()), 2)
-    return {"avg_by_day": avg_by_day, "monthly_avg": monthly_avg}
 
 
 @app.get("/api/release_notes")

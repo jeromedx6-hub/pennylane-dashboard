@@ -106,7 +106,7 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 .pl-table tr.uncateg-exp-row:hover td { background:rgba(245,158,11,.1); }
 /* Modal uncatégorisé */
 #uncateg-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:9999; align-items:center; justify-content:center; }
-#uncateg-modal .um-box { background:#0f1117; border:1px solid #1e2340; border-radius:12px; width:min(1040px,95vw); max-height:85vh; display:flex; flex-direction:column; }
+#uncateg-modal .um-box { background:#0f1117; border:1px solid #1e2340; border-radius:12px; width:min(860px,95vw); max-height:85vh; display:flex; flex-direction:column; }
 #uncateg-modal .um-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #1e2340; }
 #uncateg-modal .um-header h3 { margin:0; font-size:15px; color:#e2e8f0; }
 #uncateg-modal .um-header button { background:none; border:none; color:#64748b; font-size:18px; cursor:pointer; padding:4px 8px; }
@@ -261,43 +261,22 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ MAIN ════════════════════════════════════════════════ -->
 <div class="main">
 
-<!-- ════ GLOBAL HEADER (commun à toutes les pages) ══════════ -->
-<div id="global-header" style="
-  display:flex;align-items:center;justify-content:space-between;
-  background:#12141e;border-bottom:1px solid #1e2340;
-  padding:10px 24px;margin-bottom:20px;gap:16px;flex-wrap:wrap;
-  position:sticky;top:0;z-index:90;">
-
-  <!-- Titre dynamique + sous-titre -->
-  <div>
-    <div id="gh-title" style="font-size:15px;font-weight:700;color:#fff">Dashboard Financier</div>
-    <div id="gh-sub" style="font-size:11px;color:#475569;margin-top:2px">Données Pennylane · Sync automatique quotidienne</div>
-  </div>
-
-  <!-- Contrôles contextuels (injectés par showPage) -->
-  <div id="gh-controls" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"></div>
-
-  <!-- Zone droite fixe : badge sync + bouton -->
-  <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
-    <div class="sync-badge" id="gh-sync-badge">
-      <div class="dot"></div>
-      <span id="gh-sync-time">Chargement…</span>
-      <span id="gh-sync-version" style="margin-left:6px;padding:1px 6px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:4px;font-size:10px;color:#6366f1;font-weight:600;letter-spacing:.03em"></span>
-    </div>
-    <button id="gh-sync-btn" class="sync-btn" onclick="openSyncModal()" title="Synchroniser Pennylane, recalculer le P&L et mettre à jour toutes les catégories">
-      ⟳ Recalculer
-    </button>
-  </div>
-</div>
-
 <!-- ════ PAGE : INDICATEURS ════════════════════════════════ -->
 <div id="page-indicateurs" class="page">
 
-  <!-- contrôles contextuels injectés dans global-header via showPage -->
-  <div style="display:none">
-    <span id="sync-time"></span>
-    <span id="sync-version"></span>
-    <span id="header-sub"></span>
+  <!-- Header -->
+  <div class="page-header">
+    <div>
+      <div class="page-title">Indicateurs <span>Financiers</span></div>
+      <div class="header-sub" id="header-sub">Données Pennylane · Sync quotidienne automatique</div>
+    </div>
+    <div class="header-right">
+      <select id="month-combo" onchange="onComboChange(this.value)"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 16px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:170px;outline:none">
+      </select>
+      <div class="sync-badge"><div class="dot"></div><span id="sync-time">Sync OK</span><span id="sync-version" style="margin-left:6px;padding:1px 6px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:4px;font-size:10px;color:#6366f1;font-weight:600;letter-spacing:.03em"></span></div>
+      <button class="sync-btn" id="sync-btn-indicateurs" onclick="openSyncModal()">⟳ Recalculer</button>
+    </div>
   </div>
 
   <!-- KPI Row 1 -->
@@ -305,15 +284,23 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     <div class="kpi-card green"  onclick="openModal('ca')">      <div class="kpi-hint">↗ détail</div><div class="kpi-label">CA Encaissé HT</div>      <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
     <div class="kpi-card red"   onclick="openModal('charges')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Total Charges</div>        <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
     <div class="kpi-card blue"  onclick="openModal('ebitda')">  <div class="kpi-hint">↗ détail</div><div class="kpi-label">EBITDA</div>              <div class="kpi-value skeleton" style="height:32px;width:120px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card orange" onclick="openModal('roas')">   <div class="kpi-hint">↗ détail</div><div class="kpi-label">ROAS Cash</div>           <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card purple" onclick="openModal('marge')">  <div class="kpi-hint">↗ détail</div><div class="kpi-label">Marge EBITDA</div>        <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
   </div>
 
   <!-- KPI Row 2 -->
   <div class="kpi-grid" id="kpi-row2">
-    <div class="kpi-card blue"   onclick="openModal('mc1')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Acquisition</div>     <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card green"  onclick="openModal('mc2')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Sales & Closing</div>  <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card purple" onclick="openModal('mc3')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Opérationnel</div>     <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
-    <div class="kpi-card red"    onclick="openModal('mc4')"> <div class="kpi-hint">↗ détail</div><div class="kpi-label">Taux Structure</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card orange" onclick="openModal('roas')">   <div class="kpi-hint">↗ détail</div><div class="kpi-label">ROAS Cash</div>           <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card blue"  onclick="openModal('mc1')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">MC1 (après Acq.)</div>   <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card green" onclick="openModal('mc2')">     <div class="kpi-hint">↗ détail</div><div class="kpi-label">MC2 (après Sales)</div> <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+    <div class="kpi-card purple" onclick="openModal('charges')"><div class="kpi-hint">↗ détail</div><div class="kpi-label">Marge Brute</div>         <div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div><div class="kpi-deltas"></div></div>
+  </div>
+
+  <!-- KPI Row 3 — Ratios coûts / CA HT -->
+  <div class="kpi-grid" id="kpi-row3">
+    <div class="kpi-card blue"><div class="kpi-label">Acquisition / CA HT</div><div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div></div>
+    <div class="kpi-card purple"><div class="kpi-label">Sales & Closing / CA HT</div><div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div></div>
+    <div class="kpi-card green"><div class="kpi-label">Opérationnel / CA HT</div><div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div></div>
+    <div class="kpi-card orange"><div class="kpi-label">Structure / CA HT</div><div class="kpi-value skeleton" style="height:32px;width:80px;margin-bottom:8px"></div></div>
   </div>
 
   <!-- Charts row -->
@@ -377,17 +364,13 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
           ↓ Export CSV<span id="pl-export-count"></span>
         </button>
         <div class="tabs">
-          <button class="tab active" id="tab-ht"  onclick="switchHtTtc(true,this)"  title="Montants hors taxe">HT</button>
-          <button class="tab"        id="tab-ttc" onclick="switchHtTtc(false,this)" title="Montants toutes taxes comprises">TTC</button>
-        </div>
-        <div class="tabs">
           <button class="tab active" id="tab-month" onclick="switchPL('month',this)">Mois</button>
           <button class="tab" id="tab-ytd" onclick="switchPL('ytd',this)">YTD</button>
         </div>
       </div>
     </div>
     <table class="pl-table" id="pl-table">
-      <thead><tr><th style="width:45%">Poste</th><th id="pl-col-header">Réalisé HT</th><th>% CA</th></tr></thead>
+      <thead><tr><th style="width:45%">Poste</th><th>Réalisé</th><th>% CA</th></tr></thead>
       <tbody id="pl-body"></tbody>
     </table>
   </div>
@@ -407,9 +390,20 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ PAGE : KPI REVENUE ════════════════════════════════ -->
 <div id="page-kpi" class="page" style="display:none">
 
-  <!-- contrôles contextuels KPI Revenue (injectés dans gh-controls) -->
-  <div style="display:none">
-    <span id="rev30-period-sub">30 jours glissants · Source Pennylane</span>
+  <div class="page-header">
+    <div>
+      <div class="page-title">KPI <span>Revenue</span></div>
+      <div class="header-sub" id="rev30-period-sub">30 jours glissants · Source Pennylane</div>
+    </div>
+    <div class="header-right">
+      <div class="date-selector">
+        <button class="date-btn active" id="rev30-btn-rolling" onclick="setRev30Mode('rolling',this)">30j glissants</button>
+        <button class="date-btn" id="rev30-btn-month" onclick="setRev30Mode('month',this)">Mois</button>
+      </div>
+      <select id="rev30-month-select" onchange="fetchRev30()"
+        style="display:none;background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 12px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"></select>
+      <button class="sync-btn" onclick="openSyncModal()">⟳ Recalculer</button>
+    </div>
   </div>
 
   <!-- 4 KPI Cards -->
@@ -424,28 +418,8 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
   <div class="card" style="margin-bottom:20px">
     <div class="card-header">
       <div>
-        <div class="card-title" id="rev30-chart-title">CA encaissé · Jour par jour</div>
+        <div class="card-title">CA encaissé · Jour par jour</div>
         <div class="card-sub" id="rev30-chart-sub">—</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <!-- Toggle jour/semaine -->
-        <div style="display:flex;background:#12141e;border:1px solid #2d3148;border-radius:6px;overflow:hidden">
-          <button id="btn-view-day" onclick="setRev30View('day')"
-            style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:#6366f1;color:#fff;transition:all .15s">
-            Jour
-          </button>
-          <button id="btn-view-week" onclick="setRev30View('week')"
-            style="padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:transparent;color:#475569;transition:all .15s">
-            Semaine
-          </button>
-        </div>
-        <!-- Moy. 3 mois -->
-        <button id="btn-avg3m" onclick="toggleAvg3m()" style="
-          background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);
-          color:#a5b4fc;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;
-          transition:all .2s;white-space:nowrap">
-          ∼ Moy. 3 mois
-        </button>
       </div>
     </div>
     <div style="position:relative;height:300px;padding-bottom:8px">
@@ -485,7 +459,23 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ PAGE : ALERTES ════════════════════════════════════ -->
 <div id="page-alertes" class="page" style="display:none">
 
-  <div style="display:none"><span id="alerts-sync-time"></span></div>
+  <div class="page-header">
+    <div>
+      <div class="page-title">Alertes <span>Superviseur</span></div>
+      <div class="header-sub">Transactions non catégorisées · Nouvelles catégories · Recatégorisations</div>
+    </div>
+    <div class="header-right">
+      <select id="alerts-days" onchange="loadAlerts()"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none">
+        <option value="7">7 derniers jours</option>
+        <option value="30" selected>30 derniers jours</option>
+        <option value="90">90 derniers jours</option>
+        <option value="180">6 derniers mois</option>
+      </select>
+      <div class="sync-badge"><div class="dot"></div><span id="alerts-sync-time">Chargement…</span></div>
+      <button class="sync-btn" id="sync-cats-btn" onclick="syncCategoriesNow()">⟳ Mettre à jour</button>
+    </div>
+  </div>
 
   <!-- KPI cards résumé -->
   <div id="alerts-kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
@@ -532,7 +522,19 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ PAGE : MAPPING ════════════════════════════════════ -->
 <div id="page-mapping" class="page" style="display:none">
 
-  <div style="display:none"><span id="mapping-sync-label"></span></div>
+  <div class="page-header">
+    <div>
+      <div class="page-title">Mapping <span>Catégories</span></div>
+      <div class="header-sub">Statut du mapping Pennylane → P&L par section · mis à jour à chaque sync</div>
+    </div>
+    <div class="header-right">
+      <input type="month" id="mapping-month"
+        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"
+        onchange="loadMappingStatus()">
+      <div class="sync-badge"><div class="dot"></div><span id="mapping-sync-label">—</span></div>
+      <button class="sync-btn" onclick="loadMappingStatus()">⟳ Rafraîchir</button>
+    </div>
+  </div>
 
   <!-- KPI row -->
   <div id="mapping-kpi-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
@@ -569,6 +571,15 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ════ PAGE : RELEASE NOTES ══════════════════════════════ -->
 <div id="page-release" class="page" style="display:none">
 
+  <div class="page-header">
+    <div>
+      <div class="page-title">Release <span>Notes</span></div>
+      <div class="header-sub">Historique des changements détectés et mises à jour du superviseur</div>
+    </div>
+    <div class="header-right">
+      <button class="sync-btn" onclick="loadReleaseNotes()">⟳ Rafraîchir</button>
+    </div>
+  </div>
 
   <div class="card">
     <div id="release-notes-body"><div style="color:#475569;text-align:center;padding:40px">Chargement…</div></div>
@@ -579,7 +590,15 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
 <!-- ═══════════════════════ PAGE CRM SYSTEME.IO ═══════════════════════════ -->
 <div id="page-crm" class="page" style="display:none">
 
-  <div style="display:none"><span id="crm-sync-time"></span></div>
+  <div class="page-header">
+    <div>
+      <div class="page-title">◈ &nbsp;CRM <span>Systeme.io</span></div>
+      <div class="header-sub" id="crm-sync-time">Chargement des données…</div>
+    </div>
+    <div class="header-right">
+      <button class="sync-btn" id="crm-refresh-btn" onclick="fetchCRM(true)">⟳ &nbsp;Actualiser</button>
+    </div>
+  </div>
 
   <!-- KPI Cards -->
   <div class="kpi-grid" id="crm-kpi-grid" style="margin-bottom:20px">
@@ -642,7 +661,6 @@ const API = window.location.port === '8080' || window.location.port === ''
 let state = {
   month:   currentMonth(),
   ytd:     false,
-  showHt:  true,   // true = HT (défaut), false = TTC
   kpis:    null,
   pl:      null,
   evol:    null,
@@ -656,18 +674,6 @@ let chartDonut = null;
 // ── Utils ────────────────────────────────────────────────────
 function currentMonth() {
   return new Date().toISOString().slice(0,7);
-}
-
-// Vignette transaction saisie manuellement
-function manualBadge(tx) {
-  if (!tx || !tx.manually_mapped) return '';
-  return `<span title="Catégorie saisie manuellement" style="
-    display:inline-flex;align-items:center;gap:3px;
-    background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);
-    color:#f59e0b;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:600;
-    letter-spacing:.04em;flex-shrink:0;vertical-align:middle;margin-left:5px">
-    ✎ Manuel
-  </span>`;
 }
 
 function fmt(n, decimals=0) {
@@ -708,33 +714,26 @@ async function loadSyncVersion() {
     const r = await fetch(`${API}/api/sync_status`);
     const d = await r.json();
     const ver = d.sync_version || '';
+    const el  = document.getElementById('sync-version');
+    if (el && ver && ver !== '—') el.textContent = ver;
 
-    // Mise à jour global header
-    const ghVer  = document.getElementById('gh-sync-version');
-    const ghTime = document.getElementById('gh-sync-time');
-    const ghDot  = document.querySelector('#gh-sync-badge .dot');
-    if (ghVer && ver && ver !== '—') ghVer.textContent = ver;
-
+    // Badge en retard : dot rouge + tooltip âge
     if (d.sync_overdue) {
-      if (ghDot)  ghDot.style.background = '#ef4444';
-      if (ghTime) { ghTime.textContent = `⚠ Sync en retard · ${d.sync_age_hours||'?'}h`; ghTime.style.color = '#f97316'; }
-    } else {
-      if (ghTime) ghTime.textContent = 'Sync OK';
+      const dot = document.querySelector('.sync-badge .dot');
+      if (dot) dot.style.background = '#ef4444';
+      const timeEl = document.getElementById('sync-time');
+      if (timeEl && timeEl.textContent.startsWith('Sync OK')) {
+        const h = d.sync_age_hours ? `${d.sync_age_hours}h` : '?';
+        timeEl.textContent = `⚠ Sync en retard · ${h}`;
+        timeEl.style.color = '#f97316';
+      }
     }
-
-    // Compat anciens éléments (cachés)
-    const el = document.getElementById('sync-version');
-    if (el && ver) el.textContent = ver;
-    const timeEl = document.getElementById('sync-time');
-    if (timeEl) timeEl.textContent = ghTime ? ghTime.textContent : 'Sync OK';
   } catch(e) {}
 }
 loadSyncVersion();
 
 // ── Modal transactions non catégorisées ──────────────────────
 let _uncategData = [];   // cache pour export CSV
-
-let _uncategAllCategories = [];
 
 async function openUncategorizedModal(type) {
   const m   = state.month || new Date().toISOString().slice(0,7);
@@ -746,7 +745,7 @@ async function openUncategorizedModal(type) {
               :                       '⚠ Dépenses non catégorisées';
 
   document.getElementById('uncateg-modal-title').textContent = title;
-  document.getElementById('uncateg-modal-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#475569">Chargement…</td></tr>';
+  document.getElementById('uncateg-modal-tbody').innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#475569">Chargement…</td></tr>';
   document.getElementById('uncateg-modal-meta').textContent = '';
   document.getElementById('uncateg-modal-footer').textContent = '';
   document.getElementById('uncateg-modal').style.display = 'flex';
@@ -755,7 +754,6 @@ async function openUncategorizedModal(type) {
     const r = await fetch(url);
     const d = await r.json();
     _uncategData = d.data || [];
-    _uncategAllCategories = d.all_categories || [];
 
     document.getElementById('uncateg-modal-meta').textContent =
       `${d.count} transaction${d.count>1?'s':''} · Total : ${fmtEur(d.total)}`;
@@ -764,246 +762,32 @@ async function openUncategorizedModal(type) {
 
     if (!_uncategData.length) {
       document.getElementById('uncateg-modal-tbody').innerHTML =
-        '<tr><td colspan="7" style="text-align:center;padding:24px;color:#475569">Aucune transaction</td></tr>';
+        '<tr><td colspan="5" style="text-align:center;padding:24px;color:#475569">Aucune transaction</td></tr>';
       return;
     }
 
-    _renderUncategRows();
+    let rows = '';
+    for (const tx of _uncategData) {
+      const sign  = tx.direction === 'credit' ? '+' : '−';
+      const color = tx.direction === 'credit' ? '#4ade80' : '#f87171';
+      const label = (tx.label || '').slice(0, 80) + ((tx.label||'').length > 80 ? '…' : '');
+      rows += `<tr>
+        <td style="white-space:nowrap">${tx.date}</td>
+        <td title="${(tx.label||'').replace(/"/g,'&quot;')}">${label}</td>
+        <td style="color:#94a3b8">${tx.third_party || '—'}</td>
+        <td style="text-align:right;color:${color};font-weight:600">${sign}${fmtEur(parseFloat(tx.amount||0))}</td>
+        <td style="color:#64748b;font-size:11px">${tx.category_name || '—'}</td>
+      </tr>`;
+    }
+    document.getElementById('uncateg-modal-tbody').innerHTML = rows;
   } catch(e) {
     document.getElementById('uncateg-modal-tbody').innerHTML =
-      `<tr><td colspan="7" style="text-align:center;padding:24px;color:#f87171">Erreur : ${e.message}</td></tr>`;
-  }
-}
-
-function _renderUncategRows() {
-  const opts = _uncategAllCategories.map(c =>
-    `<option value="${c}">${c}</option>`
-  ).join('');
-
-  let rows = '';
-  for (const tx of _uncategData) {
-    const sign   = tx.direction === 'credit' ? '+' : '−';
-    const color  = tx.direction === 'credit' ? '#4ade80' : '#f87171';
-    const label  = (tx.label || '').slice(0, 60) + ((tx.label||'').length > 60 ? '…' : '');
-    const sugg   = tx.suggested_category || '';
-    const suggHtml = sugg
-      ? `<span style="background:#1e3a2f;color:#4ade80;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600">${sugg}</span>`
-      : `<span style="color:#475569;font-size:10px">—</span>`;
-
-    const selectId  = `sel-${tx.id}`;
-    const btnId     = `btn-${tx.id}`;
-    const rowId     = `row-${tx.id}`;
-    const txJson    = JSON.stringify({id: tx.id, label: tx.label, date: tx.date}).replace(/"/g,'&quot;');
-
-    rows += `<tr id="${rowId}">
-      <td style="white-space:nowrap;font-size:11px">${tx.date}</td>
-      <td title="${(tx.label||'').replace(/"/g,'&quot;')}" style="font-size:11px">${label}${manualBadge(tx)}</td>
-      <td style="text-align:right;color:${color};font-weight:600;white-space:nowrap">${sign}${fmtEur(parseFloat(tx.amount||0))}</td>
-      <td>${suggHtml}</td>
-      <td>
-        <select id="${selectId}" onchange="_updateApproveAllBtn()"
-          style="background:#1a1d27;border:1px solid #2d3148;border-radius:6px;padding:3px 6px;color:#e2e8f0;font-size:11px;width:100%;max-width:180px">
-          <option value="">— choisir —</option>
-          ${sugg ? `<option value="${sugg}" selected>${sugg}</option>` : ''}
-          ${opts}
-        </select>
-      </td>
-      <td>
-        <button id="${btnId}" onclick="approveCategory('${tx.id}', '${selectId}', '${rowId}', ${txJson})"
-          style="background:#1e3a5f;border:1px solid #3b82f6;border-radius:6px;padding:3px 10px;color:#93c5fd;font-size:11px;cursor:pointer;white-space:nowrap;transition:all .15s"
-          onmouseover="this.style.background='#2563eb';this.style.color='#fff'"
-          onmouseout="this.style.background='#1e3a5f';this.style.color='#93c5fd'">
-          ✓ Valider
-        </button>
-      </td>
-    </tr>`;
-  }
-  document.getElementById('uncateg-modal-tbody').innerHTML = rows;
-  _updateApproveAllBtn();
-}
-
-async function approveCategory(txId, selectId, rowId, txInfo) {
-  const select = document.getElementById(selectId);
-  const cat    = select ? select.value : '';
-  if (!cat) { alert('Choisis une catégorie avant de valider.'); return; }
-
-  const btn = document.querySelector(`#${rowId} button`);
-  if (btn) { btn.textContent = '…'; btn.disabled = true; }
-
-  try {
-    const r = await fetch(`${API}/api/transactions/${txId}/approve-category`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ category_name: cat, label: txInfo.label, date: txInfo.date })
-    });
-    const d = await r.json();
-    if (d.status === 'ok') {
-      // Retirer la ligne du tableau + de _uncategData
-      const row = document.getElementById(rowId);
-      if (row) row.remove();
-      _uncategData = _uncategData.filter(t => t.id !== txId);
-      // Mettre à jour le compteur
-      const meta = document.getElementById('uncateg-modal-meta');
-      if (meta) meta.textContent = `${_uncategData.length} transaction${_uncategData.length>1?'s':''} restante${_uncategData.length>1?'s':''}`;
-      // Rafraîchir le P&L en arrière-plan
-      fetchAll();
-    } else {
-      alert('Erreur : ' + (d.detail || 'inconnue'));
-      if (btn) { btn.textContent = '✓ Valider'; btn.disabled = false; }
-    }
-  } catch(e) {
-    alert('Erreur réseau : ' + e.message);
-    if (btn) { btn.textContent = '✓ Valider'; btn.disabled = false; }
+      `<tr><td colspan="5" style="text-align:center;padding:24px;color:#f87171">Erreur : ${e.message}</td></tr>`;
   }
 }
 
 function closeUncategModal() {
   document.getElementById('uncateg-modal').style.display = 'none';
-}
-
-// ── Met à jour le compteur "Valider tout" selon les selects remplis ────
-function _updateApproveAllBtn() {
-  let count = 0;
-  for (const tx of _uncategData) {
-    const sel = document.getElementById(`sel-${tx.id}`);
-    if (sel && sel.value) count++;
-  }
-  const btn = document.getElementById('btn-approve-all');
-  const cntEl = document.getElementById('approve-all-count');
-  if (cntEl) cntEl.textContent = count;
-  if (btn) {
-    btn.disabled = count === 0;
-    btn.style.opacity = count > 0 ? '1' : '0.4';
-    btn.style.cursor  = count > 0 ? 'pointer' : 'not-allowed';
-  }
-}
-
-// ── Suggérer par IA (ponctuel) ─────────────────────────────────
-async function aiSuggestAll() {
-  const btn = document.getElementById('btn-ai-suggest');
-  if (!btn || btn.disabled) return;
-
-  const toSuggest = _uncategData.filter(tx => {
-    const sel = document.getElementById(`sel-${tx.id}`);
-    return sel && !sel.value; // seulement ceux sans suggestion
-  });
-
-  if (!toSuggest.length) { showToast('Toutes les transactions ont déjà une suggestion', 'info'); return; }
-
-  btn.disabled  = true;
-  btn.innerHTML = '<span class="spin">⟳</span> IA en cours…';
-
-  // Envoyer par batch de 50 (limite contexte)
-  const BATCH = 50;
-  let totalSuggested = 0;
-
-  try {
-    for (let i = 0; i < toSuggest.length; i += BATCH) {
-      const batch = toSuggest.slice(i, i + BATCH);
-      btn.innerHTML = `<span class="spin">⟳</span> IA ${i+1}–${Math.min(i+BATCH, toSuggest.length)}/${toSuggest.length}…`;
-
-      const res  = await fetch(`${API}/api/transactions/ai-suggest`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ transactions: batch.map(tx => ({
-          id: tx.id, label: tx.label, amount: tx.amount,
-          direction: tx.direction, date: tx.date
-        }))}),
-      });
-      const json = await res.json();
-
-      if (json.status === 'error') {
-        showToast('❌ Erreur IA : ' + json.detail, 'error');
-        break;
-      }
-
-      // Injecter les suggestions dans les selects
-      for (const s of (json.suggestions || [])) {
-        const sel = document.getElementById(`sel-${s.id}`);
-        if (!sel || !s.category) continue;
-        // Ajouter l'option si elle n'existe pas
-        if (![...sel.options].some(o => o.value === s.category)) {
-          const opt = document.createElement('option');
-          opt.value = s.category; opt.text = s.category;
-          sel.add(opt, 1);
-        }
-        sel.value = s.category;
-        // Marquer visuellement la confidence
-        const row = document.getElementById(`row-${s.id}`);
-        if (row) {
-          const badge = row.querySelector('.ai-badge');
-          if (!badge) {
-            const td = sel.closest('td');
-            if (td) {
-              const b = document.createElement('span');
-              b.className = 'ai-badge';
-              b.style.cssText = 'font-size:9px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);color:#a78bfa;border-radius:4px;padding:1px 5px;font-weight:600;margin-left:4px;vertical-align:middle';
-              b.title = `Suggestion IA — confiance : ${s.confidence}`;
-              b.textContent = s.confidence === 'high' ? '✦ IA ●' : s.confidence === 'medium' ? '✦ IA ◐' : '✦ IA ○';
-              td.appendChild(b);
-            }
-          }
-        }
-        totalSuggested++;
-      }
-    }
-
-    _updateApproveAllBtn();
-    showToast(`✦ ${totalSuggested} suggestion${totalSuggested>1?'s':''} IA injectée${totalSuggested>1?'s':''}`, 'success');
-  } catch(e) {
-    showToast('❌ Erreur réseau : ' + e.message, 'error');
-  } finally {
-    btn.disabled  = false;
-    btn.innerHTML = '✦ Suggérer par IA';
-  }
-}
-
-// ── Valider tout en batch ──────────────────────────────────────
-async function approveAll() {
-  const btn = document.getElementById('btn-approve-all');
-  if (!btn || btn.disabled) return;
-
-  const items = [];
-  for (const tx of _uncategData) {
-    const sel = document.getElementById(`sel-${tx.id}`);
-    if (sel && sel.value) {
-      items.push({ id: tx.id, label: tx.label, date: tx.date, category_name: sel.value });
-    }
-  }
-  if (!items.length) return;
-
-  const confirmed = confirm(`Valider ${items.length} transaction${items.length>1?'s':''} en une fois ?`);
-  if (!confirmed) return;
-
-  btn.disabled  = true;
-  btn.innerHTML = `<span class="spin">⟳</span> Validation…`;
-
-  try {
-    const res  = await fetch(`${API}/api/transactions/approve-all`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ items }),
-    });
-    const json = await res.json();
-
-    if (json.status === 'ok') {
-      showToast(`✅ ${json.validated} transaction${json.validated>1?'s':''} validée${json.validated>1?'s':''}`, 'success');
-      // Recharger le modal
-      const titleEl = document.getElementById('uncateg-modal-title');
-      const curType = titleEl?.dataset?.type || 'all';
-      const curMonth = titleEl?.dataset?.month;
-      await openUncategorizedModal(curType, curMonth);
-      if (document.getElementById('page-indicateurs').style.display !== 'none') fetchAll();
-    } else {
-      showToast('❌ Erreur lors de la validation batch', 'error');
-    }
-  } catch(e) {
-    showToast('❌ Erreur réseau', 'error');
-  } finally {
-    btn.disabled  = false;
-    btn.innerHTML = '✓ Valider tout (<span id="approve-all-count">0</span>)';
-    _updateApproveAllBtn();
-  }
 }
 
 function exportUncategorizedCSV() {
@@ -1139,6 +923,12 @@ function renderNoData() {
     emptyCard('green',  'MC2 (après Sales)') +
     emptyCard('purple', 'Marge Brute');
 
+  const row3 = document.getElementById('kpi-row3');
+  if (row3) row3.innerHTML =
+    emptyCard('blue',   'Acquisition / CA HT') +
+    emptyCard('purple', 'Sales &amp; Closing / CA HT') +
+    emptyCard('green',  'Opérationnel / CA HT') +
+    emptyCard('orange', 'Structure / CA HT');
 
   // Aussi remettre le dot en vert lors du prochain renderAll réussi
   state._dotOverride = true;
@@ -1151,13 +941,13 @@ function renderKPIs(d) {
       { color:'green',  label:'CA Encaissé HT',      val: fmtEur(d.ca_ht),            sup:'', modal:'ca',      deltas:[] },
       { color:'red',    label:'Total Charges',        val: fmtEur(d.total_charges),    sup:'', modal:'charges', deltas:[] },
       { color:'blue',   label:'EBITDA',               val: fmtEur(d.ebitda),           sup:'', modal:'ebitda',  deltas:[] },
-      { color:'orange', label:'ROAS Cash',            val: d.roas_cash ? fmt(d.roas_cash,1)+'x' : '—', sup:'', modal:'roas', deltas:[] },
+      { color:'purple', label:'Marge EBITDA',         val: fmt(d.ebitda_pct,1),        sup:'%',modal:'marge',   deltas:[] },
     ]},
     { id:'kpi-row2', items:[
-      { color:'blue',   label:'Taux Acquisition',     val: fmt(d.acq_pct,1),            sup:'%',modal:'mc1',     deltas:[] },
-      { color:'green',  label:'Taux Sales & Closing', val: fmt(d.sales_pct,1),          sup:'%',modal:'mc2',     deltas:[] },
-      { color:'purple', label:'Taux Opérationnel',    val: fmt(d.ops_pct,1),            sup:'%',modal:'mc3', deltas:[] },
-      { color:'red',    label:'Taux Structure',        val: fmt(d.structure_pct,1),      sup:'%',modal:'mc4', deltas:[] },
+      { color:'orange', label:'ROAS Cash',            val: d.roas_cash ? fmt(d.roas_cash,1)+'x' : '—', sup:'', modal:'roas', deltas:[] },
+      { color:'blue',   label:'MC1 (après Acq.)',     val: fmt(d.mc1_pct,1),           sup:'%',modal:'mc1',     deltas:[] },
+      { color:'green',  label:'MC2 (après Sales)',    val: fmt(d.mc2_pct,1),           sup:'%',modal:'mc2',     deltas:[] },
+      { color:'purple', label:'Marge Brute',          val: fmt(d.marge_brute_pct,1),   sup:'%',modal:'charges', deltas:[] },
     ]},
   ];
 
@@ -1172,6 +962,39 @@ function renderKPIs(d) {
       </div>`).join('');
   }
 
+  // Row 3 — Ratios coûts / CA HT
+  const ca = d.ca_ht || 0;
+  const r  = (cost, warn, danger) => {
+    const v = ca > 0 ? Math.abs(cost) / ca * 100 : null;
+    const color = v === null ? '#64748b' : v >= danger ? '#f87171' : v >= warn ? '#fb923c' : '#4ade80';
+    return { v, color };
+  };
+  const rAcq = r(d.total_acquisition, 30, 50);
+  const rSal = r(d.total_sales,       15, 25);
+  const rOps = r(d.total_ops,         25, 40);
+  const rStr = r(d.total_structure,   20, 35);
+
+  const ratioCard = (color, label, ratio, amount, modalKey) => {
+    const barW = ratio.v !== null ? Math.min(ratio.v, 100) : 0;
+    return `
+    <div class="kpi-card ${color}" onclick="openModal('${modalKey}')" style="cursor:pointer">
+      <div class="kpi-hint">↗ détail</div>
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value" style="color:${ratio.color};font-size:26px;margin-bottom:6px">
+        ${ratio.v !== null ? fmt(ratio.v,1)+'<sup style="font-size:13px">%</sup>' : '—'}
+      </div>
+      <div style="height:3px;background:#1e2235;border-radius:2px;margin-bottom:8px;overflow:hidden">
+        <div style="height:100%;width:${barW}%;background:${ratio.color};border-radius:2px;transition:width .6s;opacity:.7"></div>
+      </div>
+      <div class="kpi-deltas"><span style="font-size:11px;color:#475569">${fmtEur(Math.abs(amount))}</span></div>
+    </div>`};
+
+  const row3 = document.getElementById('kpi-row3');
+  if (row3) row3.innerHTML =
+    ratioCard('blue',   'Acquisition / CA HT',       rAcq, d.total_acquisition, 'ratio-acq') +
+    ratioCard('purple', 'Sales &amp; Closing / CA HT', rSal, d.total_sales,       'ratio-sal') +
+    ratioCard('green',  'Opérationnel / CA HT',      rOps, d.total_ops,          'ratio-ops') +
+    ratioCard('orange', 'Structure / CA HT',          rStr, d.total_structure,    'ratio-str');
 }
 
 // ── Evolution Chart (stacked décomposé) ─────────────────────
@@ -1340,11 +1163,9 @@ const MC_LABELS      = { 2:'MC1 — Marge Contribution 1', 3:'MC2 — Marge Cont
 function renderPL(plData, kpis) {
   if (!plData || !plData.length || !kpis) return;
 
-  // HT ou TTC selon toggle (state.showHt = true par défaut)
-  const showHt = state.showHt !== false;
-  const getAmt = r => showHt
-    ? (r.amount_ht != null ? r.amount_ht : r.amount)
-    : r.amount;
+  const ca = kpis.ca_ht || 1;
+  const mcs = { 2: kpis.mc1, 3: kpis.mc2, 4: kpis.marge_brute, 5: kpis.ebitda };
+  const mcPcts = { 2: kpis.mc1_pct, 3: kpis.mc2_pct, 4: kpis.marge_brute_pct, 5: kpis.ebitda_pct };
 
   // Séparer les lignes spéciales hors P&L
   const uncategRev = plData.find(r => r.axe3_analytics === '_uncategorized_revenue')
@@ -1362,42 +1183,26 @@ function renderPL(plData, kpis) {
     bySection[s].push(row);
   }
 
-  // Calculer CA et totaux section depuis les données affichées (HT ou TTC)
-  const caRows    = (bySection[1] || []).filter(r => r.is_revenue);
-  const ca        = caRows.reduce((s,r) => s + getAmt(r), 0) || 1;
-  const secTotals = {};
-  for (const s of [2,3,4,5]) {
-    secTotals[s] = (bySection[s] || []).filter(r => !r.is_revenue).reduce((sum,r) => sum + Math.abs(getAmt(r)), 0);
-  }
-  const mc1        = ca - secTotals[2];
-  const mc2        = mc1 - secTotals[3];
-  const margeBrute = mc2 - secTotals[4];
-  const ebitda     = margeBrute - secTotals[5];
-  const mcs        = { 2: mc1, 3: mc2, 4: margeBrute, 5: ebitda };
-  const mcPcts     = { 2: ca ? mc1/ca*100 : null, 3: ca ? mc2/ca*100 : null,
-                       4: ca ? margeBrute/ca*100 : null, 5: ca ? ebitda/ca*100 : null };
-
   let html = '';
   for (const s of [1,2,3,4,5]) {
     const rows = bySection[s] || [];
     if (!rows.length) continue;
 
     html += `<tr class="section-header"><td colspan="3">${SECTION_LABELS[s]}</td></tr>`;
-    for (const r of rows.sort((a,b)=>Math.abs(getAmt(b))-Math.abs(getAmt(a)))) {
-      const amt = getAmt(r);
-      const pct = fmt(Math.abs(amt)/ca*100, 1);
+    for (const r of rows.sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))) {
+      const pct = fmt(Math.abs(r.amount)/ca*100, 1);
       const cls = r.is_revenue ? 'positive' : '';
       const posteAttr = JSON.stringify(r.poste_budgetaire).replace(/"/g, '&quot;');
       html += `<tr class="pl-row" onclick="openPlLineModal(${posteAttr}, ${!!r.is_revenue})">
         <td>${r.poste_budgetaire}</td>
-        <td class="${cls}">${r.is_revenue ? '' : '— '}${fmtEur(Math.abs(amt))}</td>
+        <td class="${cls}">${r.is_revenue ? '' : '— '}${fmtEur(Math.abs(r.amount))}</td>
         <td>${pct}%</td>
       </tr>`;
     }
 
     if (s > 1 && mcs[s] !== undefined) {
       const TOTAL_LABELS = { 2:'Total Coûts Acquisition', 3:'Total Sales & Closing', 4:'Total Opérationnel', 5:'Total Structure' };
-      const sectionTotal = secTotals[s];
+      const sectionTotal = rows.filter(r => !r.is_revenue).reduce((sum,r) => sum + Math.abs(r.amount), 0);
       const isEbitda = s === 5;
       if (sectionTotal > 0) {
         const lbl = JSON.stringify(TOTAL_LABELS[s]).replace(/"/g,'&quot;');
@@ -1409,12 +1214,11 @@ function renderPL(plData, kpis) {
       }
       // Bandeau dépenses non catégorisées — entre Total Structure et EBITDA
       if (isEbitda && uncategExp && uncategExp.amount > 0) {
-        const uncAmt = getAmt(uncategExp);
         html += `<tr class="uncateg-exp-row" onclick="openUncategorizedModal('expenses')">
           <td>⚠ <strong style="color:#f59e0b">Dépenses non catégorisées</strong>
               <span style="font-size:10px;color:#64748b;font-weight:400;margin-left:6px">${uncategExp.tx_count} tx · hors P&L · cliquer pour détail</span></td>
-          <td style="color:#f59e0b;font-weight:600">— ${fmtEur(uncAmt)}</td>
-          <td style="color:#64748b">${fmt(uncAmt/ca*100,1)}%</td>
+          <td style="color:#f59e0b;font-weight:600">— ${fmtEur(uncategExp.amount)}</td>
+          <td style="color:#64748b">${fmt(uncategExp.amount/ca*100,1)}%</td>
         </tr>`;
       }
       // Ligne marge / EBITDA
@@ -1426,25 +1230,23 @@ function renderPL(plData, kpis) {
         <td class="${cls}">${fmtPct(mcPcts[s])}</td>
       </tr>`;
     } else if (s === 1) {
-      const caLabel = showHt ? 'TOTAL CA HT' : 'TOTAL CA TTC';
-      html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(1, '${caLabel}', true)">
-        <td>${caLabel}</td><td class="positive">${fmtEur(ca)}</td><td>100%</td>
+      html += `<tr class="subtotal pl-row" onclick="openPlSectionModal(1, 'TOTAL CA HT', true)">
+        <td>TOTAL CA HT</td><td class="positive">${fmtEur(kpis.ca_ht)}</td><td>100%</td>
       </tr>`;
 
       // ── Ligne Remboursements / Avoirs ──
       const remb      = state.avoirs?.remboursements_encaisses;
       const rembTotal = remb?.total || 0;
       if (rembTotal > 0) {
-        const rembDisplay = showHt ? rembTotal / 1.20 : rembTotal;
-        const rembPct = fmt(rembDisplay / ca * 100, 1);
+        const rembPct = fmt(rembTotal / ca * 100, 1);
         html += `<tr class="pl-row" onclick="openAvoirsModal()" style="cursor:pointer">
           <td style="color:#f87171">↩ Remboursements clients
             <span style="font-size:10px;color:#64748b;margin-left:6px">${remb.count} remb. · cliquer pour détail</span>
           </td>
-          <td style="color:#f87171;font-weight:600">— ${fmtEur(rembDisplay)}</td>
+          <td style="color:#f87171;font-weight:600">— ${fmtEur(rembTotal)}</td>
           <td style="color:#64748b">${rembPct}%</td>
         </tr>`;
-        const caNet = ca - rembDisplay;
+        const caNet = kpis.ca_ht - rembTotal;
         html += `<tr class="subtotal">
           <td style="color:#94a3b8">CA Net de remboursements</td>
           <td class="${caNet >= 0 ? 'positive' : 'negative'}" style="font-weight:700">${fmtEur(caNet)}</td>
@@ -1454,15 +1256,14 @@ function renderPL(plData, kpis) {
 
       // Encaissements non catégorisés — après TOTAL CA HT
       if (uncategRev && uncategRev.amount > 0) {
-        const uncRevAmt = getAmt(uncategRev);
         html += `<tr class="uncateg-row" onclick="openUncategorizedModal('revenue')">
           <td>⚠ Encaissements non catégorisés
               <span style="font-size:10px;color:#64748b;font-style:normal;margin-left:6px">${uncategRev.tx_count} tx · hors P&L · cliquer pour détail</span></td>
-          <td style="color:#f59e0b">${fmtEur(uncRevAmt)}</td>
-          <td style="color:#64748b">${fmt(uncRevAmt/ca*100,1)}%</td>
+          <td style="color:#f59e0b">${fmtEur(uncategRev.amount)}</td>
+          <td style="color:#64748b">${fmt(uncategRev.amount/ca*100,1)}%</td>
         </tr>`;
         // Ligne CA total potentiel
-        const caTotal = ca + uncRevAmt;
+        const caTotal = kpis.ca_ht + uncategRev.amount;
         html += `<tr class="ca-total-row">
           <td>↳ CA total potentiel (catégorisé + non catégorisé)</td>
           <td class="positive">${fmtEur(caTotal)}</td>
@@ -1582,9 +1383,6 @@ function renderCAbars(plData) {
   }).join('');
 }
 
-// ── Alias pour showPage ──────────────────────────────────────
-function populateMonthCombo() { buildMonthCombo(); }
-
 // ── Month selector ───────────────────────────────────────────
 function buildMonthCombo() {
   const today = new Date();
@@ -1612,20 +1410,9 @@ function onComboChange(val) {
   fetchAll();
 }
 
-function switchHtTtc(showHt, btn) {
-  // Toggle HT / TTC — ne recharge pas les données, juste re-render
-  state.showHt = showHt;
-  document.getElementById('tab-ht').classList.toggle('active',  showHt);
-  document.getElementById('tab-ttc').classList.toggle('active', !showHt);
-  const colHeader = document.getElementById('pl-col-header');
-  if (colHeader) colHeader.textContent = showHt ? 'Réalisé HT' : 'Réalisé TTC';
-  if (state.pl && state.kpis) renderPL(state.pl, state.kpis);
-}
-
 function switchPL(mode, btn) {
-  // Ne pas toucher aux boutons HT/TTC lors du switch Mois/YTD
-  document.getElementById('tab-month').classList.toggle('active', mode !== 'ytd');
-  document.getElementById('tab-ytd').classList.toggle('active',   mode === 'ytd');
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
   const today = new Date();
   const year  = today.getFullYear();
   if (mode === 'ytd') {
@@ -1683,20 +1470,12 @@ async function openModal(type) {
       renderModalEbitda(d);
       break;
     case 'mc1':
-      document.getElementById('modal-title').textContent = 'Taux Acquisition — Détail & Évolution';
+      document.getElementById('modal-title').textContent = 'MC1 — Marge de Contribution 1';
       renderModalMC(d, 1);
       break;
     case 'mc2':
-      document.getElementById('modal-title').textContent = 'Taux Sales & Closing — Détail & Évolution';
+      document.getElementById('modal-title').textContent = 'MC2 — Marge de Contribution 2';
       renderModalMC(d, 2);
-      break;
-    case 'mc3':
-      document.getElementById('modal-title').textContent = 'Taux Opérationnel — Détail & Évolution';
-      renderModalMC(d, 3);
-      break;
-    case 'mc4':
-      document.getElementById('modal-title').textContent = 'Taux Structure — Détail & Évolution';
-      renderModalMC(d, 4);
       break;
     case 'roas':
       document.getElementById('modal-title').textContent = 'ROAS Cash — Détail Acquisition';
@@ -1784,88 +1563,24 @@ function renderModalEbitda(d) {
   </tbody></table>`;
 }
 
-async function renderModalMC(d, step) {
-  // step: 1=Acquisition(s2), 2=Sales(s3), 3=Ops(s4), 4=Structure(s5)
-  const sectionMap = { 1:2, 2:3, 3:4, 4:5 };
-  const poleMap    = { 1:'Acquisition', 2:'Sales & Closing', 3:'Opérationnel', 4:'Structure' };
-  const chargeMap  = { 1:d.total_acquisition, 2:d.total_sales, 3:d.total_ops, 4:d.total_structure };
-  const tauxMap    = { 1:d.acq_pct, 2:d.sales_pct, 3:d.ops_pct, 4:d.structure_pct };
-  const section = sectionMap[step];
-  const pole    = poleMap[step];
-  const charge  = chargeMap[step];
-  const taux    = tauxMap[step];
-  const plRows  = (state.pl||[]).filter(r=>r.pl_section===section&&!r.is_revenue)
-                                .sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
-
+function renderModalMC(d, step) {
+  const label  = step===1 ? 'MC1' : 'MC2';
+  const val    = step===1 ? d.mc1 : d.mc2;
+  const pct    = step===1 ? d.mc1_pct : d.mc2_pct;
+  const charge = step===1 ? d.total_acquisition : d.total_sales;
+  const pole   = step===1 ? 'Acquisition' : 'Sales & Closing';
   document.getElementById('modal-body').innerHTML = `
   <div class="modal-kpi-row">
-    ${kpiBlock('Total ' + pole, fmtEur(charge))}
-    ${kpiBlock('Taux / CA', fmt(taux,1)+'%')}
-    ${kpiBlock('CA HT', fmtEur(d.ca_ht))}
+    ${kpiBlock(label, fmtEur(val))}
+    ${kpiBlock(`${label} %`, fmtPct(pct))}
+    ${kpiBlock(`Coûts ${pole}`, fmtEur(charge))}
   </div>
-
-  <!-- Évolution M/M + Camembert côte à côte -->
-  <div style="display:grid;grid-template-columns:1fr 280px;gap:20px;margin:16px 0">
-    <div>
-      <div class="modal-section" style="margin-bottom:8px">Évolution mensuelle</div>
-      <div style="position:relative;height:180px"><canvas id="mc-evol-chart"></canvas></div>
-    </div>
-    <div>
-      <div class="modal-section" style="margin-bottom:8px">Répartition</div>
-      <div style="position:relative;height:180px"><canvas id="mc-donut-chart"></canvas></div>
-    </div>
-  </div>
-
-  <div class="modal-section">Détail postes</div>
+  <div class="modal-section">Détail dans le P&L</div>
   <table class="detail-table"><thead><tr><th>Poste</th><th>Montant</th><th>% CA</th></tr></thead><tbody>
-    ${plRows.map(r=>`<tr><td>${r.poste_budgetaire}</td><td class="negative">— ${fmtEur(Math.abs(r.amount))}</td><td>${fmt(Math.abs(r.amount)/d.ca_ht*100,1)}%</td></tr>`).join('')}
-    <tr style="font-weight:700"><td>TOTAL ${pole.toUpperCase()}</td><td class="negative">— ${fmtEur(charge)}</td><td>${fmt(taux,1)}%</td></tr>
+    ${(state.pl||[]).filter(r=>r.pl_section===(step+1)&&!r.is_revenue).sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount))
+      .map(r=>`<tr><td>${r.poste_budgetaire}</td><td class="negative">— ${fmtEur(Math.abs(r.amount))}</td><td>${fmt(Math.abs(r.amount)/d.ca_ht*100,1)}%</td></tr>`).join('')}
+    <tr><td>${label}</td><td class="${val>=0?'positive':'negative'}">${fmtEur(val)}</td><td class="${val>=0?'positive':'negative'}">${fmtPct(pct)}</td></tr>
   </tbody></table>`;
-
-  // ── Évolution M/M depuis API ──────────────────────────
-  try {
-    const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
-    const evol = await fetch(`${API}/api/pl_section?section=${section}&year=${year}`).then(r=>r.json());
-    const months = evol.data || [];
-    const labels = months.map(m => { const [,mm]=m.month.split('-'); return ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'][+mm-1]; });
-    const vals   = months.map(m => Math.abs(m.amount));
-    const curMo  = (state.selectedMonth||'').slice(5,7);
-    const bgColors = months.map(m => m.month.slice(5,7)===curMo ? '#6366f1' : 'rgba(99,102,241,0.4)');
-
-    const ctx1 = document.getElementById('mc-evol-chart')?.getContext('2d');
-    if (ctx1) new Chart(ctx1, {
-      type: 'bar',
-      data: { labels, datasets:[{ data:vals, backgroundColor:bgColors, borderRadius:3 }] },
-      options: { responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, datalabels:{display:false},
-          tooltip:{ callbacks:{ label: i => fmtEur(i.raw) } } },
-        scales:{
-          x:{ grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
-          y:{ grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}, callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`}, beginAtZero:true }
-        }
-      }
-    });
-  } catch(e) { console.error(e); }
-
-  // ── Camembert répartition postes ─────────────────────
-  if (plRows.length) {
-    const ctx2 = document.getElementById('mc-donut-chart')?.getContext('2d');
-    const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#ddd6fe','#ede9fe','#f5f3ff'];
-    if (ctx2) new Chart(ctx2, {
-      type: 'doughnut',
-      data: {
-        labels: plRows.map(r=>r.poste_budgetaire),
-        datasets:[{ data: plRows.map(r=>Math.abs(r.amount)),
-          backgroundColor: plRows.map((_,i)=>COLORS[i%COLORS.length]),
-          borderWidth:0 }]
-      },
-      options: { responsive:true, maintainAspectRatio:false, cutout:'60%',
-        plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', font:{size:10}, boxWidth:10, padding:6 } },
-          datalabels:{display:false},
-          tooltip:{ callbacks:{ label: i => `${i.label}: ${fmtEur(i.raw)} (${fmt(i.raw/charge*100,1)}%)` } } }
-      }
-    });
-  }
 }
 
 function renderModalRoas(d) {
@@ -2153,7 +1868,7 @@ function _renderPlLineContent(data, isRevenue, year, transactions) {
         const amt = Math.abs(parseFloat(tx.amount||0));
         tHtml += `<tr>
           <td style="padding:5px 10px;color:#475569;font-size:10px;border-bottom:1px solid #1a1d27">${tx.date}</td>
-          <td style="padding:5px 10px;color:#cbd5e1;font-size:11px;border-bottom:1px solid #1a1d27">${tx.label||'—'}${manualBadge(tx)}</td>
+          <td style="padding:5px 10px;color:#cbd5e1;font-size:11px;border-bottom:1px solid #1a1d27">${tx.label||'—'}</td>
           <td colspan="2" style="padding:5px 10px;text-align:right;font-weight:500;font-size:11px;border-bottom:1px solid #1a1d27" class="${isRevenue?'positive':'negative'}">${isRevenue?'':'— '}${fmtEur(amt)}</td>
         </tr>`;
       }
@@ -2299,88 +2014,16 @@ function closeModalOutside(e) {
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
 
 // ── Navigation pages ─────────────────────────────────────────
-// ── Config des pages pour le header global ────────────────────
-const PAGE_CONFIG = {
-  indicateurs: {
-    title:    'Indicateurs <span style="color:#6366f1">Financiers</span>',
-    sub:      'Données Pennylane · Sync quotidienne automatique',
-    controls: () => `
-      <select id="month-combo" onchange="onComboChange(this.value)"
-        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 16px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:170px;outline:none">
-      </select>`,
-    onShow:   null,
-  },
-  kpi: {
-    title:    'KPI <span style="color:#6366f1">Revenue</span>',
-    sub:      '30 jours glissants · Source Pennylane',
-    controls: () => `
-      <div class="date-selector">
-        <button class="date-btn active" id="rev30-btn-rolling" onclick="setRev30Mode('rolling',this)">30j glissants</button>
-        <button class="date-btn" id="rev30-btn-month" onclick="setRev30Mode('month',this)">Mois</button>
-      </div>
-      <select id="rev30-month-select" onchange="fetchRev30()"
-        style="display:none;background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 12px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"></select>`,
-    onShow:   () => { fetchRev30(); fetchNewClients(); },
-  },
-  alertes: {
-    title:    'Alertes <span style="color:#6366f1">Superviseur</span>',
-    sub:      'Transactions non catégorisées · Nouvelles catégories · Recatégorisations',
-    controls: () => `
-      <select id="alerts-days" onchange="loadAlerts()"
-        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none">
-        <option value="7">7 derniers jours</option>
-        <option value="30" selected>30 derniers jours</option>
-        <option value="90">90 derniers jours</option>
-        <option value="180">6 derniers mois</option>
-      </select>`,
-    onShow:   loadAlerts,
-  },
-  mapping: {
-    title:    'Mapping <span style="color:#6366f1">Catégories</span>',
-    sub:      'Statut du mapping Pennylane → P&L · mis à jour à chaque sync',
-    controls: () => `
-      <input type="month" id="mapping-month"
-        style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:7px 14px;color:#e2e8f0;font-size:12px;cursor:pointer;outline:none"
-        onchange="loadMappingStatus()">`,
-    onShow:   loadMappingStatus,
-  },
-  release: {
-    title:    'Release <span style="color:#6366f1">Notes</span>',
-    sub:      'Historique des changements détectés et mises à jour du superviseur',
-    controls: () => '',
-    onShow:   loadReleaseNotes,
-  },
-  crm: {
-    title:    '◈ &nbsp;CRM <span style="color:#6366f1">Systeme.io</span>',
-    sub:      'Données Systeme.io · Contacts et ventes',
-    controls: () => '',
-    onShow:   () => fetchCRM(),
-  },
-};
-
-let _currentPage = 'indicateurs';
-
 function showPage(page, el) {
-  _currentPage = page;
   document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
   document.getElementById('page-' + page).style.display = '';
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
-
-  // Mettre à jour le header global
-  const cfg = PAGE_CONFIG[page] || {};
-  const ghTitle    = document.getElementById('gh-title');
-  const ghSub      = document.getElementById('gh-sub');
-  const ghControls = document.getElementById('gh-controls');
-  if (ghTitle)    ghTitle.innerHTML  = cfg.title    || page;
-  if (ghSub)      ghSub.textContent  = cfg.sub      || '';
-  if (ghControls) ghControls.innerHTML = cfg.controls ? cfg.controls() : '';
-
-  // Re-peupler le month-combo si on revient sur Indicateurs
-  if (page === 'indicateurs' && typeof populateMonthCombo === 'function') populateMonthCombo();
-
-  // Callback spécifique
-  if (cfg.onShow) cfg.onShow();
+  if (page === 'kpi')    { fetchRev30(); fetchNewClients(); }
+  if (page === 'crm')    fetchCRM();
+  if (page === 'alertes') loadAlerts();
+  if (page === 'mapping') loadMappingStatus();
+  if (page === 'release') loadReleaseNotes();
 }
 
 // ── Alertes ───────────────────────────────────────────────────
@@ -2704,38 +2347,9 @@ function renderReleaseNotes(notes) {
 }
 
 // ── KPI Revenue ───────────────────────────────────────────────
-let rev30Data    = null;
-let chartRev30   = null;
-let rev30Mode    = 'rolling'; // 'rolling' | 'month'
-let rev30View    = 'day';     // 'day' | 'week'
-
-function setRev30View(view) {
-  rev30View = view;
-  document.getElementById('btn-view-day').style.background  = view === 'day'  ? '#6366f1' : 'transparent';
-  document.getElementById('btn-view-day').style.color       = view === 'day'  ? '#fff' : '#475569';
-  document.getElementById('btn-view-week').style.background = view === 'week' ? '#6366f1' : 'transparent';
-  document.getElementById('btn-view-week').style.color      = view === 'week' ? '#fff' : '#475569';
-  const titleEl = document.getElementById('rev30-chart-title');
-  if (titleEl) titleEl.textContent = view === 'week' ? 'CA encaissé · Semaine par semaine' : 'CA encaissé · Jour par jour';
-  if (rev30Data) renderRev30(rev30Data);
-}
-
-// Regroupe les données daily en semaines ISO (lundi → dimanche)
-function _groupByWeek(dailyArr) {
-  const weeks = {};
-  for (const d of dailyArr) {
-    const dt  = new Date(d.date + 'T12:00:00');
-    // Lundi de la semaine
-    const day = dt.getDay() === 0 ? 6 : dt.getDay() - 1; // 0=lun … 6=dim
-    const mon = new Date(dt); mon.setDate(dt.getDate() - day);
-    const key = mon.toISOString().slice(0, 10);
-    if (!weeks[key]) weeks[key] = { date: key, ca: 0, tx_count: 0, end: key };
-    weeks[key].ca       += d.ca;
-    weeks[key].tx_count += d.tx_count || 0;
-    weeks[key].end = d.date;
-  }
-  return Object.values(weeks).sort((a, b) => a.date.localeCompare(b.date));
-}
+let rev30Data  = null;
+let chartRev30 = null;
+let rev30Mode  = 'rolling'; // 'rolling' | 'month'
 
 function initRev30() {
   const sel = document.getElementById('rev30-month-select');
@@ -2766,10 +2380,6 @@ function setRev30Mode(mode, btn) {
 }
 
 async function fetchRev30() {
-  // Reset cache moy 3 mois à chaque changement de période
-  _avg3mData = null;
-  const sub = document.getElementById('rev30-chart-sub');
-  if (sub && sub._prev) { sub.textContent = sub._prev; sub._prev = null; }
   initRev30();
   const sel = document.getElementById('rev30-month-select');
   const url = (rev30Mode === 'month' && sel?.value)
@@ -2785,10 +2395,9 @@ async function fetchRev30() {
   }
 }
 
-function renderRev30(data) {
-  if (!data) data = rev30Data;
+function renderRev30() {
+  const data = rev30Data;
   if (!data) return;
-  window._lastRev30Data = data;
 
   const k    = data.kpis;
   const grid = document.getElementById('rev30-grid');
@@ -2805,49 +2414,24 @@ function renderRev30(data) {
   if (sub)  sub.textContent  = `${periodTxt} · Source Pennylane`;
   if (csub) csub.textContent = periodTxt;
 
-  // 4 KPI Cards avec comparaison référence
-  const ref  = data.ref || {};
-  const refLbl = ref.label || '';
-
-  function _delta(val, refVal, invert = false) {
-    if (!refVal) return '';
-    const diff = val - refVal;
-    const pct  = Math.round(diff / refVal * 100);
-    const up   = diff >= 0;
-    const good = invert ? !up : up;   // invert=true → hausse = mauvais (ex: remboursements)
-    const color = good ? '#4ade80' : '#f87171';
-    const arrow = up ? '▲' : '▼';
-    const sign  = up ? '+' : '';
-    return `<span style="color:${color};font-size:11px;font-weight:600">${arrow} ${sign}${pct}%</span>
-            <span style="color:#64748b;font-size:10px"> vs ${refLbl}</span>`;
-  }
-
+  // 4 KPI Cards
   grid.innerHTML = `
     <div class="kpi-card green">
       <div class="kpi-label">CA Encaissé</div>
       <div class="kpi-value" style="font-size:22px">${fmtEur(k.ca_total)}</div>
-      <div class="kpi-deltas" style="display:flex;flex-direction:column;gap:2px">
-        <span style="font-size:10px;color:#64748b">${ref.ca_total ? fmtEur(ref.ca_total)+' réf.' : ''}</span>
-        ${_delta(k.ca_total, ref.ca_total)}
-      </div>
+      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">30 jours glissants</span></div>
     </div>
     <div class="kpi-card red">
       <div class="kpi-label">Remboursements</div>
       <div class="kpi-value" style="font-size:22px;color:${k.remboursements>0?'#f87171':'#e2e8f0'}">
         ${k.remboursements>0?'- ':''}${fmtEur(k.remboursements)}
       </div>
-      <div class="kpi-deltas" style="display:flex;flex-direction:column;gap:2px">
-        <span style="font-size:10px;color:#64748b">${ref.remboursements ? fmtEur(ref.remboursements)+' réf.' : ''}</span>
-        ${_delta(k.remboursements, ref.remboursements, true)}
-      </div>
+      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">débits catégories revenus</span></div>
     </div>
     <div class="kpi-card blue">
       <div class="kpi-label">Panier Moyen</div>
       <div class="kpi-value" style="font-size:22px">${fmtEur(k.panier_moyen)}</div>
-      <div class="kpi-deltas" style="display:flex;flex-direction:column;gap:2px">
-        <span style="font-size:10px;color:#64748b">${ref.panier_moyen ? fmtEur(ref.panier_moyen)+' réf.' : ''}</span>
-        ${_delta(k.panier_moyen, ref.panier_moyen)}
-      </div>
+      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">par transaction revenu</span></div>
     </div>
     <div class="kpi-card orange">
       <div class="kpi-label">Transactions Non Traitées</div>
@@ -2857,94 +2441,44 @@ function renderRev30(data) {
       <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">sans mapping P&L</span></div>
     </div>`;
 
-  // Regroupement jour ou semaine
-  const isWeek  = rev30View === 'week';
-  const points  = isWeek ? _groupByWeek(data.daily) : data.daily;
-
-  const labels = points.map(d => {
+  // Histogramme
+  const labels = data.daily.map(d => {
     const [,m,dd] = d.date.split('-');
-    if (isWeek) {
-      const [,me,de] = d.end.split('-');
-      return `${+dd}/${m}–${+de}/${me}`;
-    }
     return `${+dd}/${m}`;
   });
-  const values  = points.map(d => d.ca);
-  const colors  = values.map(v => v > 0 ? 'rgba(99,102,241,0.75)' : 'rgba(248,113,113,0.5)');
+  const values = data.daily.map(d => d.ca);
+  const colors = values.map(v => v > 0 ? 'rgba(99,102,241,0.75)' : 'rgba(248,113,113,0.5)');
   const borders = values.map(v => v > 0 ? '#6366f1' : '#f87171');
-
-  // Ligne moyenne 3 mois (uniquement en vue jour)
-  const avgData = (!isWeek && _avg3mActive && _avg3mData)
-    ? data.daily.map(d => {
-        const dayNum = d.date.slice(8, 10);
-        return _avg3mData.avg_by_day[dayNum] ?? null;
-      })
-    : null;
 
   const ctx = document.getElementById('chart-rev30')?.getContext('2d');
   if (!ctx) return;
   if (chartRev30) chartRev30.destroy();
-
-  const datasets = [{
-    label: 'CA encaissé',
-    data: values,
-    backgroundColor: colors,
-    borderColor: borders,
-    borderWidth: 1,
-    borderRadius: 3,
-    order: 2,
-  }];
-
-  if (avgData) {
-    datasets.push({
-      label: 'Moy. 3 mois',
-      data: avgData,
-      type: 'line',
-      borderColor: 'rgba(251,191,36,0.85)',
-      backgroundColor: 'transparent',
-      borderWidth: 2,
-      borderDash: [5, 4],
-      pointRadius: 3,
-      pointBackgroundColor: 'rgba(251,191,36,0.85)',
-      tension: 0.3,
-      order: 1,
-    });
-  }
-
   chartRev30 = new Chart(ctx, {
     type: 'bar',
-    data: { labels, datasets },
+    data: {
+      labels,
+      datasets: [{
+        label: 'CA encaissé',
+        data: values,
+        backgroundColor: colors,
+        borderColor: borders,
+        borderWidth: 1,
+        borderRadius: 3,
+      }]
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: {
-          display: !!avgData,
-          labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 20 }
-        },
+        legend: { display: false },
         datalabels: { display: false },
         tooltip: {
           callbacks: {
             title: items => {
-              const pt = points[items[0].dataIndex];
-              if (isWeek) {
-                const s = new Date(pt.date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
-                const e = new Date(pt.end  + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
-                return `Semaine du ${s} au ${e}`;
-              }
-              return new Date(pt.date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
+              const d = data.daily[items[0].dataIndex];
+              return new Date(d.date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
             },
-            label: item => {
-              if (item.dataset.label === 'Moy. 3 mois') return `Moy. 3 mois : ${fmtEur(item.raw)}`;
-              const pt = points[item.dataIndex];
-              const lines = [`CA : ${fmtEur(item.raw)}`];
-              if (isWeek && pt.tx_count) lines.push(`${pt.tx_count} transaction${pt.tx_count>1?'s':''}`);
-              if (!isWeek && avgData) {
-                const diff = item.raw - (avgData[item.dataIndex] ?? 0);
-                lines.push(`vs moy. : ${diff>=0?'+':''}${fmtEur(diff)}`);
-              }
-              return lines;
-            }
+            label: item => `CA : ${fmtEur(item.raw)}`
           }
         }
       },
@@ -2965,52 +2499,6 @@ function renderRev30(data) {
       }
     }
   });
-}
-
-// ── Moyenne 3 mois ────────────────────────────────────────────
-let _avg3mActive = false;
-let _avg3mData   = null;
-
-async function toggleAvg3m() {
-  const btn = document.getElementById('btn-avg3m');
-  _avg3mActive = !_avg3mActive;
-
-  if (_avg3mActive) {
-    btn.style.background = 'rgba(251,191,36,0.2)';
-    btn.style.borderColor = 'rgba(251,191,36,0.6)';
-    btn.style.color = '#fbbf24';
-    btn.textContent = '✕ Moy. 3 mois';
-
-    if (!_avg3mData) {
-      btn.textContent = '⟳ Chargement…';
-      const selEl = document.getElementById('rev30-month-select');
-      const month = (rev30Mode === 'month' && selEl?.value) ? selEl.value : null;
-      const url = month ? `/api/revenue_avg3m?month=${month}` : '/api/revenue_avg3m';
-      try {
-        const r = await fetch(url);
-        _avg3mData = await r.json();
-        // Afficher la moyenne mensuelle dans le sous-titre
-        const sub = document.getElementById('rev30-chart-sub');
-        if (sub && _avg3mData.monthly_avg) {
-          const prev = sub.textContent;
-          sub._prev = prev;
-          sub.textContent = prev + ` · Moy. 3 mois : ${fmtEur(_avg3mData.monthly_avg)}`;
-        }
-      } catch(e) { console.error(e); }
-      btn.textContent = '✕ Moy. 3 mois';
-    }
-  } else {
-    btn.style.background = 'rgba(99,102,241,0.15)';
-    btn.style.borderColor = 'rgba(99,102,241,0.3)';
-    btn.style.color = '#a5b4fc';
-    btn.textContent = '∼ Moy. 3 mois';
-    // Restore sous-titre
-    const sub = document.getElementById('rev30-chart-sub');
-    if (sub && sub._prev) { sub.textContent = sub._prev; sub._prev = null; }
-  }
-
-  // Re-render le graphique avec ou sans ligne
-  if (window._lastRev30Data) renderRev30(window._lastRev30Data);
 }
 
 // ── Nouvelles Ventes (sales_events webhook) ────────────────────
@@ -3391,7 +2879,7 @@ function openImpayes() {
           <td style="padding:7px 10px;font-size:11px;color:#94a3b8;border-bottom:1px solid #1a1d27;white-space:nowrap">${tx.date}</td>
           <td style="padding:7px 10px;font-size:12px;color:#4ade80;text-align:right;font-weight:600;border-bottom:1px solid #1a1d27;white-space:nowrap">${fmtEur(tx.amount)}</td>
           <td style="padding:7px 10px;font-size:11px;color:#6366f1;border-bottom:1px solid #1a1d27;white-space:nowrap">${tx.category}</td>
-          <td style="padding:7px 10px;font-size:10px;color:#475569;border-bottom:1px solid #1a1d27;max-width:260px" title="${(tx.label||'').replace(/"/g,'&quot;')}">${tx.label||'—'}${manualBadge(tx)}</td>
+          <td style="padding:7px 10px;font-size:10px;color:#475569;border-bottom:1px solid #1a1d27;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(tx.label||'').replace(/"/g,'&quot;')}">${tx.label||'—'}</td>
         </tr>`).join('');
 
       html += `
@@ -3443,17 +2931,6 @@ function closeImpayes() {
 }
 
 // ── Init ─────────────────────────────────────────────────────
-// Initialiser le header global sur la page de démarrage (indicateurs)
-(function initGlobalHeader() {
-  const cfg = PAGE_CONFIG['indicateurs'];
-  const ghTitle    = document.getElementById('gh-title');
-  const ghSub      = document.getElementById('gh-sub');
-  const ghControls = document.getElementById('gh-controls');
-  if (ghTitle)    ghTitle.innerHTML  = cfg.title;
-  if (ghSub)      ghSub.textContent  = cfg.sub;
-  if (ghControls) ghControls.innerHTML = cfg.controls();
-})();
-
 buildMonthCombo();
 fetchAll();
 // Badge alertes au démarrage (sans afficher la page)
@@ -3497,57 +2974,36 @@ async function launchSync() {
   document.getElementById('sync-progress-label').textContent  = `Sync ${from} → ${to}…`;
   _setSyncBtns(true);
 
-  // Étape 1 : sync Pennylane → transactions
-  document.getElementById('sync-progress-label').textContent = `1/3 · Sync Pennylane ${from} → ${to}…`;
-  await fetch(`${API}/api/sync?date_from=${from}&date_to=${to}`, {method:'POST'});
+  await fetch(`/api/sync?date_from=${from}&date_to=${to}`, {method:'POST'});
 
   _syncPoll = setInterval(async () => {
     try {
-      const r = await fetch(`${API}/api/sync_status`);
+      const r = await fetch('/api/sync_status');
       const s = await r.json();
       if (!s.running) {
         clearInterval(_syncPoll); _syncPoll = null;
-
-        if (s.error) {
-          document.getElementById('sync-modal').classList.remove('open');
-          _setSyncBtns(false);
-          showToast('❌ Erreur sync : ' + s.error, 'error');
-          return;
-        }
-
-        // Étape 2 : sync catégories Pennylane
-        document.getElementById('sync-progress-label').textContent = '2/3 · Mise à jour des catégories Pennylane…';
-        try { await fetch(`${API}/api/sync/categories`, {method:'POST'}); } catch(e) {}
-
-        // Étape 3 : recalcul P&L
-        document.getElementById('sync-progress-label').textContent = '3/3 · Recalcul P&L et KPIs…';
-        try { await fetch(`${API}/api/sync/recompute-pl`, {method:'POST'}); } catch(e) {}
-
-        // Fin
         document.getElementById('sync-modal').classList.remove('open');
         _setSyncBtns(false);
-        loadSyncVersion();
-        showToast(`✅ Sync complet · transactions + catégories + P&L`, 'success');
-
-        // Refresh page active
-        const cfg = PAGE_CONFIG[_currentPage];
-        if (_currentPage === 'indicateurs') fetchAll();
-        else if (_currentPage === 'kpi')    { fetchRev30(); fetchNewClients(); }
-        else if (_currentPage === 'alertes') loadAlerts();
-        else if (_currentPage === 'mapping') loadMappingStatus();
-        else if (_currentPage === 'crm')    fetchCRM();
+        if (s.error) {
+          showToast('❌ Erreur : ' + s.error, 'error');
+        } else {
+          showToast(`✅ Sync terminé · ${from} → ${to}`, 'success');
+          // Refresh la page active
+          const pg = document.querySelector('.page[style*="display: block"], .page:not([style*="none"])');
+          if (document.getElementById('page-indicateurs').style.display !== 'none') fetchAll();
+          else if (document.getElementById('page-kpi').style.display     !== 'none') fetchRev30();
+        }
       }
     } catch(e) { /* ignore erreurs réseau transitoires */ }
   }, 2000);
 }
 
 function _setSyncBtns(running) {
-  const btn = document.getElementById('gh-sync-btn');
-  if (btn) {
-    btn.disabled = running;
-    btn.classList.toggle('running', running);
-    btn.innerHTML = running ? '<span class="spin">⟳</span> En cours…' : '⟳ Recalculer';
-  }
+  document.querySelectorAll('.sync-btn').forEach(b => {
+    b.disabled = running;
+    b.classList.toggle('running', running);
+    b.innerHTML = running ? '<span class="spin">⟳</span> En cours…' : '⟳ Recalculer';
+  });
 }
 
 function showToast(msg, type = 'success') {
@@ -3564,14 +3020,7 @@ function showToast(msg, type = 'success') {
   <div class="modal" style="width:420px;max-width:95vw" onclick="event.stopPropagation()">
     <button class="modal-close" onclick="closeSyncModal()">✕</button>
     <div class="modal-title">Recalculer les données</div>
-    <div class="modal-sub" style="margin-bottom:20px">Lance les 3 étapes : sync Pennylane → mise à jour catégories → recalcul P&L &amp; KPIs</div>
-
-    <!-- Ce que fait le bouton -->
-    <div style="background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:11px;color:#64748b;line-height:1.8">
-      <div>① <strong style="color:#94a3b8">Sync transactions</strong> — récupère toutes les opérations Pennylane sur la période</div>
-      <div>② <strong style="color:#94a3b8">Catégories</strong> — détecte les nouvelles catégories et mise à jour du mapping</div>
-      <div>③ <strong style="color:#94a3b8">Recalcul P&L + KPIs</strong> — recompute le compte de résultat et tous les indicateurs</div>
-    </div>
+    <div class="modal-sub" style="margin-bottom:20px">Resynchronise Pennylane → Supabase sur la période choisie et recalcule le P&L</div>
 
     <div id="sync-modal-form">
       <div style="display:flex;gap:12px;margin-bottom:16px">
@@ -3586,17 +3035,21 @@ function showToast(msg, type = 'success') {
             style="width:100%;background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:8px 10px;color:#e2e8f0;font-size:12px;outline:none">
         </div>
       </div>
+      <div style="background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:11px;color:#64748b;line-height:1.6">
+        ⚡ Recalcule les <strong style="color:#94a3b8">transactions</strong>, le <strong style="color:#94a3b8">P&L quotidien</strong> et les <strong style="color:#94a3b8">KPIs</strong> pour cette période.<br>
+        Utile si des montants ont été corrigés dans Pennylane.
+      </div>
       <button id="sync-modal-btn" onclick="launchSync()"
         style="width:100%;padding:11px;background:#6366f1;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s"
         onmouseover="this.style.background='#4f46e5'" onmouseout="this.style.background='#6366f1'">
-        🔄 Lancer le recalcul complet
+        🔄 Lancer le sync
       </button>
     </div>
 
     <div id="sync-modal-progress" style="display:none;text-align:center;padding:20px 0">
       <div style="font-size:28px;margin-bottom:12px"><span class="spin" style="display:inline-block">⟳</span></div>
-      <div id="sync-progress-label" style="color:#94a3b8;font-size:13px;font-weight:600"></div>
-      <div style="font-size:11px;color:#475569;margin-top:8px">Patientez, cela peut prendre 30-60 secondes…</div>
+      <div id="sync-progress-label" style="color:#94a3b8;font-size:13px"></div>
+      <div style="font-size:11px;color:#475569;margin-top:8px">Récupération Pennylane · Calcul P&L · KPIs…</div>
     </div>
   </div>
 </div>
@@ -3610,26 +3063,7 @@ function showToast(msg, type = 'success') {
     </div>
     <div class="um-toolbar">
       <button class="btn-export" onclick="exportUncategorizedCSV()">⬇ Exporter CSV</button>
-
-      <!-- Bouton IA ponctuel -->
-      <button id="btn-ai-suggest" onclick="aiSuggestAll()" style="
-        display:flex;align-items:center;gap:6px;
-        background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.35);
-        color:#a78bfa;font-size:12px;padding:6px 14px;border-radius:6px;
-        cursor:pointer;font-weight:600;transition:all .2s;white-space:nowrap">
-        ✦ Suggérer par IA
-      </button>
-
-      <!-- Bouton Valider tout (actif seulement si des suggestions existent) -->
-      <button id="btn-approve-all" onclick="approveAll()" disabled style="
-        display:flex;align-items:center;gap:6px;
-        background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);
-        color:#4ade80;font-size:12px;padding:6px 14px;border-radius:6px;
-        cursor:not-allowed;font-weight:600;transition:all .2s;white-space:nowrap;opacity:0.4">
-        ✓ Valider tout (<span id="approve-all-count">0</span>)
-      </button>
-
-      <span id="uncateg-modal-meta" style="color:#64748b;font-size:12px;margin-left:auto"></span>
+      <span id="uncateg-modal-meta" style="color:#64748b;font-size:12px"></span>
     </div>
     <div class="um-body">
       <table>
@@ -3637,10 +3071,9 @@ function showToast(msg, type = 'success') {
           <tr>
             <th>Date</th>
             <th>Libellé</th>
+            <th>Tiers</th>
             <th style="text-align:right">Montant</th>
-            <th>Suggestion</th>
             <th>Catégorie</th>
-            <th>Action</th>
           </tr>
         </thead>
         <tbody id="uncateg-modal-tbody"></tbody>

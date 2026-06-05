@@ -666,7 +666,7 @@ def get_pl_line_transactions(poste: str = Query(...), year: str = Query(default=
     while page < 20:
         batch = (
             sb.table("transactions")
-            .select("date, label, amount, direction, account_name, category_name")
+            .select("date, label, amount, direction, account_name, category_name, manually_mapped")
             .gte("date", d_from)
             .order("date", desc=False)
             .range(page * size, (page + 1) * size - 1)

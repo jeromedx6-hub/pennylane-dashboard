@@ -1737,27 +1737,85 @@ function kpiBlock(label, val, tags='') {
   return `<div class="modal-kpi"><div class="modal-kpi-label">${label}</div><div class="modal-kpi-val">${val}</div>${tags}</div>`;
 }
 
+// ── Helper : donut (crée ou met à jour) ──────────────────────────
+function _drawDonut(canvasId, lbls, vals, total, colors, title) {
+  const el  = document.getElementById(canvasId);
+  if (!el) return null;
+  const existing = Chart.getChart(el);
+  if (existing) existing.destroy();
+  const ctx = el.getContext('2d');
+  return new Chart(ctx, {
+    type:'doughnut',
+    data:{ labels:lbls, datasets:[{ data:vals, backgroundColor:colors.slice(0,lbls.length), borderWidth:0 }] },
+    options:{ responsive:true, maintainAspectRatio:false, cutout:'62%',
+      plugins:{
+        title:{ display:!!title, text:title||'', color:'#94a3b8', font:{size:11,weight:'500'}, padding:{bottom:4} },
+        legend:{ position:'right', labels:{ color:'#94a3b8', font:{size:10}, boxWidth:10, padding:6 } },
+        datalabels:{display:false},
+        tooltip:{ callbacks:{ label: i=>`${i.label}: ${fmtEur(i.raw)} (${fmt(i.raw/(total||1)*100,1)}%)` } }
+      }
+    }
+  });
+}
+
 // ── Helper : chart stacké évolution mensuelle ────────────────────
-async function _drawEvolChart(canvasId, section, year, colors) {
+// opts: { donutId, donutColors, donutInitIdx, getDonutData(monthIdx, evol) }
+async function _drawEvolChart(canvasId, section, year, colors, opts={}) {
   const evol = await fetch(`${API}/api/pl_section?section=${section}&year=${year}`).then(r=>r.json());
   const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
-  const labels = (evol.months||[]).map(m => MONTH_LBL[+m.slice(5,7)-1]);
+  const allMonths = evol.months || [];
+  const labels = allMonths.map(m => MONTH_LBL[+m.slice(5,7)-1]);
   const ctx = document.getElementById(canvasId)?.getContext('2d');
-  if (!ctx || !evol.postes?.length) return;
+  if (!ctx || !evol.postes?.length) return null;
+
   const datasets = evol.postes.map((poste, i) => ({
-    label: poste,
-    data:  evol.by_poste[poste] || [],
-    backgroundColor: colors[i % colors.length],
-    stack: 'stack',
+    label: poste, data: evol.by_poste[poste] || [],
+    backgroundColor: colors[i % colors.length], stack: 'stack',
   }));
+  const nbDs = datasets.length;
+
+  // Mise à jour donut au clic d'un mois
+  const _updateDonut = (monthIdx) => {
+    if (!opts.donutId) return;
+    const lbl = labels[monthIdx];
+    if (opts.getDonutData) {
+      const {lbls, vals, total, donutColors} = opts.getDonutData(monthIdx, evol);
+      _drawDonut(opts.donutId, lbls, vals, total, donutColors||colors, lbl);
+    } else {
+      // Par défaut : ventilation par poste de la section
+      const vals  = evol.postes.map(p => evol.by_poste[p]?.[monthIdx] || 0);
+      const total = vals.reduce((s,v)=>s+v, 0);
+      _drawDonut(opts.donutId, evol.postes, vals, total, opts.donutColors||colors, lbl);
+    }
+  };
+
   new Chart(ctx, {
     type:'bar', data:{ labels, datasets },
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{ display:true, position:'bottom',
-        labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
-        datalabels:{display:false},
+    options:{ responsive:true, maintainAspectRatio:false, cursor:'pointer',
+      plugins:{
+        legend:{ display:true, position:'bottom',
+          labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
+        datalabels:{
+          // Afficher le total uniquement sur le dernier dataset (sommet de barre)
+          display: (ctx) => ctx.datasetIndex === nbDs - 1,
+          formatter: (val, ctx) => {
+            const t = ctx.chart.data.datasets.reduce((s,ds)=>s+(+ds.data[ctx.dataIndex]||0),0);
+            if (t === 0) return '';
+            return t>=1000 ? `${(t/1000).toFixed(0)}k€` : `${Math.round(t)}€`;
+          },
+          anchor:'end', align:'end', offset:2,
+          color:'#e2e8f0', font:{ size:9, weight:'600' },
+        },
         tooltip:{ mode:'index', intersect:false,
-          callbacks:{ label: i=>`${i.dataset.label}: ${fmtEur(i.raw)}` } }
+          callbacks:{
+            label:  i=>`${i.dataset.label}: ${fmtEur(i.raw)}`,
+            footer: items => `Total : ${fmtEur(items.reduce((s,i)=>s+i.raw,0))}`,
+          }
+        }
+      },
+      onClick:(event, elements) => {
+        if (!elements.length) return;
+        _updateDonut(elements[0].index);
       },
       scales:{
         x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
@@ -1767,22 +1825,22 @@ async function _drawEvolChart(canvasId, section, year, colors) {
       }
     }
   });
-  return evol;
-}
 
-// ── Helper : donut ────────────────────────────────────────────────
-function _drawDonut(canvasId, labels, values, total, colors) {
-  const ctx = document.getElementById(canvasId)?.getContext('2d');
-  if (!ctx) return;
-  new Chart(ctx, {
-    type:'doughnut',
-    data:{ labels, datasets:[{ data:values, backgroundColor:colors.slice(0,labels.length), borderWidth:0 }] },
-    options:{ responsive:true, maintainAspectRatio:false, cutout:'60%',
-      plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', font:{size:10}, boxWidth:10, padding:6 } },
-        datalabels:{display:false},
-        tooltip:{ callbacks:{ label: i=>`${i.label}: ${fmtEur(i.raw)} (${fmt(i.raw/(total||1)*100,1)}%)` } } }
+  // Initialiser le donut sur le mois courant (ou dernier mois avec données)
+  if (opts.donutId) {
+    const curMoStr = (state.selectedMonth||'').slice(0,7);
+    let initIdx = opts.donutInitIdx ?? allMonths.findIndex(m=>m===curMoStr);
+    if (initIdx < 0) {
+      // Dernier mois non nul
+      initIdx = allMonths.reduce((best, m, i) => {
+        const total = evol.postes.reduce((s,p)=>s+(evol.by_poste[p]?.[i]||0),0);
+        return total>0 ? i : best;
+      }, 0);
     }
-  });
+    _updateDonut(initIdx);
+  }
+
+  return evol;
 }
 
 async function renderModalCA(d) {
@@ -1812,8 +1870,7 @@ async function renderModalCA(d) {
   document.getElementById('modal-body').innerHTML = html;
 
   try {
-    await _drawEvolChart('ca-evol-chart', 1, year, COLORS_CA);
-    _drawDonut('ca-donut-chart', pl.map(r=>r.poste_budgetaire), pl.map(r=>Math.abs(r.amount)), total, COLORS_CA);
+    await _drawEvolChart('ca-evol-chart', 1, year, COLORS_CA, { donutId:'ca-donut-chart', donutColors:COLORS_CA });
   } catch(e) { console.error(e); }
 }
 
@@ -1847,13 +1904,13 @@ async function renderModalCharges(d, charges) {
   html += `<tr style="font-weight:700"><td>TOTAL</td><td class="negative">— ${fmtEur(total)}</td><td>100%</td></tr></tbody></table>`;
   document.getElementById('modal-body').innerHTML = html;
 
-  // ── Évolution mensuelle total charges (stacké par pôle) ──────
+  // ── Évolution mensuelle total charges (stacké par pôle, clic → donut) ─
   try {
     const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
     const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
     const POLE_SECTIONS = [2,3,4,5];
     const POLE_LABELS   = {2:'Acquisition',3:'Sales & Closing',4:'Opérationnel',5:'Structure'};
-    const POLE_COLORS   = {2:'#60a5fa',3:'#a78bfa',4:'#4ade80',5:'#fb923c'};
+    const POLE_COLORS_ARR = ['#60a5fa','#a78bfa','#4ade80','#fb923c'];
 
     const allEvol = await Promise.all(
       POLE_SECTIONS.map(s => fetch(`${API}/api/pl_section?section=${s}&year=${year}`).then(r=>r.json()))
@@ -1861,36 +1918,53 @@ async function renderModalCharges(d, charges) {
 
     const months = allEvol[0].months || [];
     const labels = months.map(m => MONTH_LBL[+m.slice(5,7)-1]);
-    const curMo  = (state.selectedMonth||'').slice(5,7);
+
+    // Datasets : 1 par pôle (total de la section pour ce mois)
+    const datasets = allEvol.map((evol, i) => ({
+      label: POLE_LABELS[POLE_SECTIONS[i]],
+      data: months.map((m, mi) =>
+        Object.values(evol.by_poste||{}).reduce((s,arr)=>s+(arr[mi]||0), 0)
+      ),
+      backgroundColor: POLE_COLORS_ARR[i],
+      stack: 'stack',
+    }));
+    const nbDs = datasets.length;
+
+    const _updateChargesDonut = (monthIdx) => {
+      const lbl  = labels[monthIdx];
+      const vals  = allEvol.map((ev, i) =>
+        Object.values(ev.by_poste||{}).reduce((s,arr)=>s+(arr[monthIdx]||0), 0)
+      );
+      const tot = vals.reduce((s,v)=>s+v,0);
+      _drawDonut('charges-donut-chart',
+        POLE_SECTIONS.map(s=>POLE_LABELS[s]), vals, tot, POLE_COLORS_ARR, lbl);
+    };
 
     const ctx1 = document.getElementById('charges-evol-chart')?.getContext('2d');
     if (ctx1) {
-      const datasets = allEvol.map((evol, i) => {
-        const s = POLE_SECTIONS[i];
-        const monthlyTotals = months.map(m => {
-          // sommer tous les postes de cette section pour ce mois
-          return Object.values(evol.by_poste || {}).reduce((sum, arr) => {
-            const idx = (evol.months||[]).indexOf(m);
-            return sum + (idx >= 0 ? (arr[idx] || 0) : 0);
-          }, 0);
-        });
-        return {
-          label: POLE_LABELS[s],
-          data:  monthlyTotals,
-          backgroundColor: POLE_COLORS[s],
-          stack: 'stack',
-        };
-      });
       new Chart(ctx1, {
-        type: 'bar',
-        data: { labels, datasets },
-        options: { responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{ display:true, position:'bottom',
-            labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
-            datalabels:{display:false},
+        type:'bar', data:{ labels, datasets },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{
+            legend:{ display:true, position:'bottom',
+              labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
+            datalabels:{
+              display: ctx => ctx.datasetIndex === nbDs-1,
+              formatter:(val,ctx)=>{
+                const t=ctx.chart.data.datasets.reduce((s,ds)=>s+(+ds.data[ctx.dataIndex]||0),0);
+                return t>=1000?`${(t/1000).toFixed(0)}k€`:t?`${Math.round(t)}€`:'';
+              },
+              anchor:'end', align:'end', offset:2,
+              color:'#e2e8f0', font:{size:9,weight:'600'},
+            },
             tooltip:{ mode:'index', intersect:false,
-              callbacks:{ label: i=>`${i.dataset.label}: ${fmtEur(i.raw)}` } }
+              callbacks:{
+                label:i=>`${i.dataset.label}: ${fmtEur(i.raw)}`,
+                footer:items=>`Total : ${fmtEur(items.reduce((s,i)=>s+i.raw,0))}`,
+              }
+            }
           },
+          onClick:(event, elements)=>{ if(elements.length) _updateChargesDonut(elements[0].index); },
           scales:{
             x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
             y:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'},
@@ -1899,28 +1973,17 @@ async function renderModalCharges(d, charges) {
           }
         }
       });
+
+      // Donut initial : mois courant
+      const curMoStr = (state.selectedMonth||'').slice(0,7);
+      let initIdx = months.findIndex(m=>m===curMoStr);
+      if (initIdx<0) initIdx = months.reduce((b,m,i)=>{
+        const t=allEvol.reduce((s,ev)=>s+Object.values(ev.by_poste||{}).reduce((ss,arr)=>ss+(arr[i]||0),0),0);
+        return t>0?i:b;
+      },0);
+      _updateChargesDonut(initIdx);
     }
   } catch(e) { console.error(e); }
-
-  // ── Donut répartition par pôle ───────────────────────────────
-  if (items.length) {
-    const ctx2 = document.getElementById('charges-donut-chart')?.getContext('2d');
-    const COLORS = ['#60a5fa','#a78bfa','#4ade80','#fb923c','#f59e0b','#e879f9'];
-    if (ctx2) new Chart(ctx2, {
-      type: 'doughnut',
-      data: {
-        labels: items.map(i=>i.pole),
-        datasets:[{ data: items.map(i=>i.amount),
-          backgroundColor: items.map((_,i)=>COLORS[i%COLORS.length]),
-          borderWidth:0 }]
-      },
-      options:{ responsive:true, maintainAspectRatio:false, cutout:'60%',
-        plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', font:{size:10}, boxWidth:10, padding:6 } },
-          datalabels:{display:false},
-          tooltip:{ callbacks:{ label: i=>`${i.label}: ${fmtEur(i.raw)} (${fmt(i.raw/total*100,1)}%)` } } }
-      }
-    });
-  }
 }
 
 async function renderModalEbitda(d) {
@@ -1954,23 +2017,31 @@ async function renderModalEbitda(d) {
     <tr style="background:rgba(99,102,241,.1)"><td style="color:#a78bfa;font-weight:700">EBITDA</td><td class="${d.ebitda>=0?'positive':'negative'}" style="font-weight:700">${fmtEur(d.ebitda)}</td><td class="${d.ebitda>=0?'positive':'negative'}" style="font-weight:700">${fmtPct(d.ebitda_pct)}</td></tr>
   </tbody></table>`;
 
-  // ── EBITDA mensuel bar chart ─────────────────────────────────
+  // ── EBITDA mensuel bar chart avec labels ────────────────────
   try {
     const ctx1 = document.getElementById('ebitda-evol-chart')?.getContext('2d');
     if (ctx1 && evolData.length) {
       const labels = evolData.map(r => MONTH_LBL[+r.month.slice(5,7)-1]);
       const vals   = evolData.map(r => r.ebitda || 0);
-      const colors = vals.map(v => v >= 0 ? 'rgba(99,102,241,0.7)' : 'rgba(248,113,113,0.7)');
+      const bgColors = vals.map(v => v >= 0 ? 'rgba(99,102,241,0.75)' : 'rgba(248,113,113,0.75)');
+      const fmtV = v => v>=1000?`${(v/1000).toFixed(0)}k€`:v<=-1000?`-${(Math.abs(v)/1000).toFixed(0)}k€`:`${Math.round(v)}€`;
       new Chart(ctx1, {
-        type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:colors, borderRadius:3 }] },
+        type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:bgColors, borderRadius:3 }] },
         options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{display:false}, datalabels:{display:false},
+          plugins:{ legend:{display:false},
+            datalabels:{
+              display: true,
+              formatter: v => v!==0 ? fmtV(v) : '',
+              anchor: ctx => ctx.dataset.data[ctx.dataIndex]>=0?'end':'start',
+              align:  ctx => ctx.dataset.data[ctx.dataIndex]>=0?'end':'start',
+              offset:2, color:'#e2e8f0', font:{size:9,weight:'600'},
+            },
             tooltip:{ callbacks:{ label: i=>`EBITDA: ${fmtEur(i.raw)}` } }
           },
           scales:{
             x:{ grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
             y:{ grid:{color:'rgba(45,49,72,0.5)'},
-              ticks:{color:'#64748b',font:{size:10},callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:v<=-1000?`-${(Math.abs(v)/1000).toFixed(0)}k€`:`${v}€`},
+              ticks:{color:'#64748b',font:{size:10},callback:fmtV},
               beginAtZero:false }
           }
         }
@@ -2040,86 +2111,13 @@ async function renderModalMC(d, step) {
     <tr style="font-weight:700"><td>TOTAL ${pole.toUpperCase()}</td><td class="negative">— ${fmtEur(charge)}</td><td>${fmt(taux,1)}%</td></tr>
   </tbody></table>`;
 
-  // ── Évolution M/M stackée par poste ──────────────────
+  // ── Évolution stackée par poste + clic → donut du mois ──────
   try {
     const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
-    const evol = await fetch(`${API}/api/pl_section?section=${section}&year=${year}`).then(r=>r.json());
-    const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
-    const labels = (evol.months || []).map(m => MONTH_LBL[+m.slice(5,7)-1]);
-    const curMo  = (state.selectedMonth||'').slice(5,7);
     const STACK_COLORS = ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#818cf8','#4f46e5','#7c3aed'];
-    const ctx1 = document.getElementById('mc-evol-chart')?.getContext('2d');
-
-    if (ctx1 && evol.postes?.length) {
-      // Chart stacké : 1 dataset par poste
-      const datasets = (evol.postes || []).map((poste, i) => ({
-        label: poste,
-        data:  evol.by_poste[poste] || [],
-        backgroundColor: STACK_COLORS[i % STACK_COLORS.length],
-        borderRadius: i === 0 ? 3 : 0,   // arrondi uniquement en haut de stack
-        stack: 'stack',
-      }));
-      new Chart(ctx1, {
-        type: 'bar',
-        data: { labels, datasets },
-        options: { responsive:true, maintainAspectRatio:false,
-          plugins:{
-            legend:{ display: datasets.length > 1, position:'bottom',
-              labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
-            datalabels:{ display:false },
-            tooltip:{ mode:'index', intersect:false,
-              callbacks:{ label: i => `${i.dataset.label}: ${fmtEur(i.raw)}` } }
-          },
-          scales:{
-            x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}},
-                // Mettre en valeur le mois courant
-                afterTickToLabelConversion: scale => {
-                  scale.ticks.forEach((t,i) => {
-                    if ((evol.months||[])[i]?.slice(5,7) === curMo)
-                      scale.ticks[i].color = '#a78bfa';
-                  });
-                }
-            },
-            y:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'},
-              ticks:{color:'#64748b',font:{size:10}, callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`},
-              beginAtZero:true }
-          }
-        }
-      });
-    } else if (ctx1) {
-      // Fallback : simple bar si pas de ventilation
-      const vals = (evol.data||[]).map(m=>Math.abs(m.amount));
-      new Chart(ctx1, {
-        type:'bar',
-        data:{ labels:(evol.data||[]).map(m=>MONTH_LBL[+m.month.slice(5,7)-1]),
-               datasets:[{data:vals,backgroundColor:'rgba(99,102,241,0.6)',borderRadius:3}] },
-        options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{legend:{display:false},datalabels:{display:false}},
-          scales:{ x:{grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10}}},
-                   y:{grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10},callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`},beginAtZero:true} } }
-      });
-    }
+    await _drawEvolChart('mc-evol-chart', section, year, STACK_COLORS,
+      { donutId:'mc-donut-chart', donutColors:STACK_COLORS });
   } catch(e) { console.error(e); }
-
-  // ── Camembert répartition postes ─────────────────────
-  if (plRows.length) {
-    const ctx2 = document.getElementById('mc-donut-chart')?.getContext('2d');
-    const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#ddd6fe','#ede9fe','#f5f3ff'];
-    if (ctx2) new Chart(ctx2, {
-      type: 'doughnut',
-      data: {
-        labels: plRows.map(r=>r.poste_budgetaire),
-        datasets:[{ data: plRows.map(r=>Math.abs(r.amount)),
-          backgroundColor: plRows.map((_,i)=>COLORS[i%COLORS.length]),
-          borderWidth:0 }]
-      },
-      options: { responsive:true, maintainAspectRatio:false, cutout:'60%',
-        plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', font:{size:10}, boxWidth:10, padding:6 } },
-          datalabels:{display:false},
-          tooltip:{ callbacks:{ label: i => `${i.label}: ${fmtEur(i.raw)} (${fmt(i.raw/charge*100,1)}%)` } } }
-      }
-    });
-  }
 }
 
 async function renderModalRoas(d) {
@@ -2154,17 +2152,23 @@ async function renderModalRoas(d) {
     <tr style="font-weight:700"><td>TOTAL ACQUISITION</td><td class="negative">— ${fmtEur(d.total_acquisition)}</td><td>${fmtPct(d.total_acquisition/d.ca_ht*100)}</td></tr>
   </tbody></table>`;
 
-  // ── ROAS mensuel bar chart ───────────────────────────────────
+  // ── ROAS mensuel bar chart avec labels ──────────────────────
   try {
     const ctx1 = document.getElementById('roas-evol-chart')?.getContext('2d');
     if (ctx1 && evolData.length) {
       const labels = evolData.map(r => MONTH_LBL[+r.month.slice(5,7)-1]);
       const vals   = evolData.map(r => r.roas_cash || 0);
-      const colors = vals.map(v => v >= 3 ? '#4ade80' : v >= 1.5 ? '#fb923c' : '#f87171');
+      const bgColors = vals.map(v => v >= 3 ? '#4ade80' : v >= 1.5 ? '#fb923c' : '#f87171');
       new Chart(ctx1, {
-        type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:colors, borderRadius:3 }] },
+        type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:bgColors, borderRadius:3 }] },
         options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{display:false}, datalabels:{display:false},
+          plugins:{ legend:{display:false},
+            datalabels:{
+              display: true,
+              formatter: v => v > 0 ? `${fmt(v,1)}x` : '',
+              anchor:'end', align:'end', offset:2,
+              color:'#e2e8f0', font:{size:9,weight:'600'},
+            },
             tooltip:{ callbacks:{ label: i=>`ROAS: ${fmt(i.raw,2)}x` } }
           },
           scales:{
@@ -2176,14 +2180,12 @@ async function renderModalRoas(d) {
         }
       });
     }
-  } catch(e) { console.error(e); }
-
-  // ── Donut acquisition ────────────────────────────────────────
-  try {
+    // Donut par défaut sur le mois courant
     _drawDonut('roas-donut-chart',
       acqRows.map(r=>r.poste_budgetaire),
       acqRows.map(r=>Math.abs(r.amount)),
-      d.total_acquisition, COLORS_ACQ);
+      d.total_acquisition, COLORS_ACQ,
+      (state.selectedMonth||'').slice(0,7).replace('-','/'));
   } catch(e) { console.error(e); }
 }
 

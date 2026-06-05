@@ -3225,11 +3225,11 @@ async function launchSync() {
   document.getElementById('sync-progress-label').textContent  = `Sync ${from} → ${to}…`;
   _setSyncBtns(true);
 
-  await fetch(`/api/sync?date_from=${from}&date_to=${to}`, {method:'POST'});
+  await fetch(`${API}/api/sync?date_from=${from}&date_to=${to}`, {method:'POST'});
 
   _syncPoll = setInterval(async () => {
     try {
-      const r = await fetch('/api/sync_status');
+      const r = await fetch(`${API}/api/sync_status`);
       const s = await r.json();
       if (!s.running) {
         clearInterval(_syncPoll); _syncPoll = null;

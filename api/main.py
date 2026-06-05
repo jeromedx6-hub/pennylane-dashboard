@@ -175,6 +175,58 @@ def _startup_auto_sync():
 threading.Thread(target=_startup_auto_sync, daemon=True).start()
 
 
+# ── Cron interne toutes les heures ────────────────────────────────────────────
+def _hourly_cron():
+    """
+    Tourne en permanence en background (toutes les heures).
+    Si le dernier sync date de plus de 23h, lance un sync automatique.
+    Robuste même si Railway ne redémarre pas le service.
+    """
+    import time
+    while True:
+        time.sleep(3600)  # attendre 1h avant chaque vérification
+        try:
+            meta = sb.table("sync_meta").select("value").eq("key", "last_synced_at").execute().data
+            if meta:
+                last = _dt.fromisoformat(meta[0]["value"].rstrip("Z"))
+                age_hours = (_dt.utcnow() - last).total_seconds() / 3600
+                if age_hours < 23:
+                    continue  # sync récent, rien à faire
+                logging.info(f"Cron horaire: dernier sync il y a {age_hours:.1f}h — déclenchement")
+            else:
+                logging.info("Cron horaire: pas de last_synced_at — déclenchement")
+
+            with _sync_lock:
+                if _sync_state["running"]:
+                    continue
+                today  = date.today()
+                d_from = today - timedelta(days=7)
+                d_to   = today
+                _sync_state.update({
+                    "running": True, "started_at": _dt.now().strftime("%H:%M:%S"),
+                    "finished_at": None, "error": None,
+                    "date_from": d_from.isoformat(), "date_to": d_to.isoformat(),
+                })
+
+            import sync as _sync_mod
+            try:
+                audit = _sync_mod.run(d_from, d_to)
+                with _sync_lock:
+                    _sync_state.update({"running": False,
+                                        "finished_at": _dt.now().strftime("%H:%M:%S"),
+                                        "audit": audit})
+                logging.info("Cron horaire: sync terminé avec succès")
+            except Exception as e:
+                with _sync_lock:
+                    _sync_state.update({"running": False, "error": str(e),
+                                        "finished_at": _dt.now().strftime("%H:%M:%S")})
+                logging.error(f"Cron horaire: sync échoué — {e}")
+        except Exception as e:
+            logging.warning(f"Cron horaire: erreur — {e}")
+
+threading.Thread(target=_hourly_cron, daemon=True).start()
+
+
 def _month_range(month: str) -> tuple[str, str]:
     """'2025-05' → ('2025-05-01', '2025-05-31')"""
     y, m = int(month[:4]), int(month[5:7])

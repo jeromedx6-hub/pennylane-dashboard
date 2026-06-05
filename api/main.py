@@ -472,6 +472,9 @@ def get_uncategorized_detail(
         exp  = _fetch_all([("eq", "category_name", ""), ("eq", "direction", "debit")])
         rows = sorted(rev + exp, key=lambda r: r["date"], reverse=True)
 
+    # Exclure les transactions à 0€ (ex: Automatic Taxes) — pas d'impact P&L, pas besoin de validation
+    rows = [r for r in rows if float(r.get("amount") or 0) != 0]
+
     # Enrichir avec suggestion
     for r in rows:
         r["suggested_category"] = _suggest(r.get("label", ""))

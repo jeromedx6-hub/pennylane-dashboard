@@ -1834,29 +1834,65 @@ async function renderModalMC(d, step) {
     <tr style="font-weight:700"><td>TOTAL ${pole.toUpperCase()}</td><td class="negative">— ${fmtEur(charge)}</td><td>${fmt(taux,1)}%</td></tr>
   </tbody></table>`;
 
-  // ── Évolution M/M depuis API ──────────────────────────
+  // ── Évolution M/M stackée par poste ──────────────────
   try {
     const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
     const evol = await fetch(`${API}/api/pl_section?section=${section}&year=${year}`).then(r=>r.json());
-    const months = evol.data || [];
-    const labels = months.map(m => { const [,mm]=m.month.split('-'); return ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'][+mm-1]; });
-    const vals   = months.map(m => Math.abs(m.amount));
+    const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+    const labels = (evol.months || []).map(m => MONTH_LBL[+m.slice(5,7)-1]);
     const curMo  = (state.selectedMonth||'').slice(5,7);
-    const bgColors = months.map(m => m.month.slice(5,7)===curMo ? '#6366f1' : 'rgba(99,102,241,0.4)');
-
+    const STACK_COLORS = ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#818cf8','#4f46e5','#7c3aed'];
     const ctx1 = document.getElementById('mc-evol-chart')?.getContext('2d');
-    if (ctx1) new Chart(ctx1, {
-      type: 'bar',
-      data: { labels, datasets:[{ data:vals, backgroundColor:bgColors, borderRadius:3 }] },
-      options: { responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, datalabels:{display:false},
-          tooltip:{ callbacks:{ label: i => fmtEur(i.raw) } } },
-        scales:{
-          x:{ grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
-          y:{ grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}, callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`}, beginAtZero:true }
+
+    if (ctx1 && evol.postes?.length) {
+      // Chart stacké : 1 dataset par poste
+      const datasets = (evol.postes || []).map((poste, i) => ({
+        label: poste,
+        data:  evol.by_poste[poste] || [],
+        backgroundColor: STACK_COLORS[i % STACK_COLORS.length],
+        borderRadius: i === 0 ? 3 : 0,   // arrondi uniquement en haut de stack
+        stack: 'stack',
+      }));
+      new Chart(ctx1, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: { responsive:true, maintainAspectRatio:false,
+          plugins:{
+            legend:{ display: datasets.length > 1, position:'bottom',
+              labels:{ color:'#94a3b8', font:{size:9}, boxWidth:10, padding:6 } },
+            datalabels:{ display:false },
+            tooltip:{ mode:'index', intersect:false,
+              callbacks:{ label: i => `${i.dataset.label}: ${fmtEur(i.raw)}` } }
+          },
+          scales:{
+            x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}},
+                // Mettre en valeur le mois courant
+                afterTickToLabelConversion: scale => {
+                  scale.ticks.forEach((t,i) => {
+                    if ((evol.months||[])[i]?.slice(5,7) === curMo)
+                      scale.ticks[i].color = '#a78bfa';
+                  });
+                }
+            },
+            y:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'},
+              ticks:{color:'#64748b',font:{size:10}, callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`},
+              beginAtZero:true }
+          }
         }
-      }
-    });
+      });
+    } else if (ctx1) {
+      // Fallback : simple bar si pas de ventilation
+      const vals = (evol.data||[]).map(m=>Math.abs(m.amount));
+      new Chart(ctx1, {
+        type:'bar',
+        data:{ labels:(evol.data||[]).map(m=>MONTH_LBL[+m.month.slice(5,7)-1]),
+               datasets:[{data:vals,backgroundColor:'rgba(99,102,241,0.6)',borderRadius:3}] },
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{legend:{display:false},datalabels:{display:false}},
+          scales:{ x:{grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10}}},
+                   y:{grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10},callback:v=>v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`},beginAtZero:true} } }
+      });
+    }
   } catch(e) { console.error(e); }
 
   // ── Camembert répartition postes ─────────────────────

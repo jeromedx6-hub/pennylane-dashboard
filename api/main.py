@@ -913,7 +913,7 @@ def get_pl_section(
     year:    str  = Query(default=None),
     revenue: bool = Query(default=False),
 ):
-    """Évolution mensuelle du total d'une section P&L (charges ou revenus)."""
+    """Évolution mensuelle du total d'une section P&L avec ventilation par poste."""
     year = year or str(date.today().year)
     d_from, d_to = f"{year}-01-01", f"{year}-12-31"
 
@@ -927,15 +927,45 @@ def get_pl_section(
     )
 
     by_month: dict[str, dict] = {}
+    # par poste : {poste: {month: amount}}
+    by_poste: dict[str, dict] = {}
+    poste_total: dict[str, float] = {}
+
     for r in rows:
         if r.get("poste_budgetaire") == "Flux internes":
             continue
-        m = r["date"][:7]
+        m     = r["date"][:7]
+        poste = r["poste_budgetaire"] or "Autres"
+        amt   = float(r["amount"] or 0)
+
         if m not in by_month:
             by_month[m] = {"amount": 0.0, "tx_count": 0}
-        by_month[m]["amount"] += float(r["amount"] or 0)
+        by_month[m]["amount"] += amt
 
-    return {"section": section, "year": year, "data": _fill_months(year, by_month, revenue)}
+        if poste not in by_poste:
+            by_poste[poste] = {}
+            poste_total[poste] = 0.0
+        by_poste[poste][m] = by_poste[poste].get(m, 0.0) + amt
+        poste_total[poste] += abs(amt)
+
+    # Trier les postes par total décroissant (plus gros en bas du stack)
+    postes_sorted = sorted(poste_total.keys(), key=lambda p: poste_total[p], reverse=True)
+
+    # Construire la liste des mois (labels)
+    all_months = [f"{year}-{str(m).zfill(2)}" for m in range(1, 13)]
+
+    by_poste_monthly = {}
+    for p in postes_sorted:
+        by_poste_monthly[p] = [abs(by_poste[p].get(m, 0.0)) for m in all_months]
+
+    return {
+        "section":  section,
+        "year":     year,
+        "data":     _fill_months(year, by_month, revenue),
+        "postes":   postes_sorted,
+        "by_poste": by_poste_monthly,
+        "months":   all_months,
+    }
 
 
 @app.get("/api/transactions")

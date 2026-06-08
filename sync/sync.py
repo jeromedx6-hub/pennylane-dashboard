@@ -279,8 +279,9 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
             aggregated[key]["tx_count"]  += 1
             continue
 
-        # Flux internes (virements Stripe→banque, GC→banque, etc.) : exclus du P&L
-        if m.get("poste_budgetaire") == "Flux internes":
+        # Exclus du P&L (hors EBITDA) : flux internes + impôts + TVA
+        _HORS_PL = {"Flux internes", "Impôt sur les Sociétés", "TVA"}
+        if m.get("poste_budgetaire") in _HORS_PL:
             continue
 
         key = m["poste_budgetaire"]
@@ -320,7 +321,7 @@ def compute_kpis(sb, target_date):
     totals = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
     total_pub = 0.0
     for r in rows:
-        if r.get("poste_budgetaire") == "Flux internes":
+        if r.get("poste_budgetaire") in {"Flux internes", "Impôt sur les Sociétés", "TVA"}:
             continue
         s = r.get("pl_section")
         if s:

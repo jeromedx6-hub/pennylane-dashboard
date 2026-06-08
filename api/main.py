@@ -341,8 +341,9 @@ def get_pl(month: str = Query(default=None), ytd: bool = Query(default=False)):
 
     aggregated: dict[str, dict] = {}
     for r in rows:
-        # Flux internes exclus du P&L (virements Stripe→banque, GC→banque, etc.)
-        if r.get("poste_budgetaire") == "Flux internes":
+        # Exclus du P&L : flux internes + IS + TVA (hors EBITDA par définition)
+        _HORS_PL = {"Flux internes", "Impôt sur les Sociétés", "TVA"}
+        if r.get("poste_budgetaire") in _HORS_PL:
             continue
         key = r["poste_budgetaire"]
         if key not in aggregated:
@@ -932,7 +933,7 @@ def get_pl_section(
     poste_total: dict[str, float] = {}
 
     for r in rows:
-        if r.get("poste_budgetaire") == "Flux internes":
+        if r.get("poste_budgetaire") in {"Flux internes", "Impôt sur les Sociétés", "TVA"}:
             continue
         m     = r["date"][:7]
         poste = r["poste_budgetaire"] or "Autres"

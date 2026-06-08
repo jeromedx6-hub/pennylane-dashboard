@@ -1791,6 +1791,15 @@ async function _drawEvolChart(canvasId, section, year, colors, opts={}) {
   const canvasEl  = document.getElementById(canvasId);
   if (!canvasEl || !evol.postes?.length) return null;
 
+  // Fetch CA mensuel pour le mode % (% du CA, pas % interne à la section)
+  const caEvol = await fetch(`${API}/api/pl_section?section=1&year=${year}`).then(r=>r.json());
+  // CA par mois : somme de tous les postes CA pour chaque mois
+  const caByMonth = allMonths.map(m => {
+    const caIdx = (caEvol.months||[]).indexOf(m);
+    if (caIdx < 0) return 0;
+    return (caEvol.postes||[]).reduce((s,p) => s + ((caEvol.by_poste[p]||[])[caIdx]||0), 0);
+  });
+
   let currentView = 'eur';
 
   // ── Données selon la vue ──────────────────────────────────────
@@ -1798,8 +1807,8 @@ async function _drawEvolChart(canvasId, section, year, colors, opts={}) {
     const raw = evol.by_poste[p] || new Array(12).fill(0);
     const data = view === 'pct'
       ? raw.map((v, mi) => {
-          const tot = evol.postes.reduce((s,p2)=>s+(evol.by_poste[p2]?.[mi]||0), 0);
-          return tot > 0 ? +((v/tot)*100).toFixed(1) : 0;
+          const ca = caByMonth[mi];
+          return ca > 0 ? +((Math.abs(v)/ca)*100).toFixed(1) : 0;
         })
       : raw;
     return { label:p, data, backgroundColor:colors[i%colors.length], stack:'stack' };
@@ -1840,17 +1849,24 @@ async function _drawEvolChart(canvasId, section, year, colors, opts={}) {
               const raw = ctx.chart.data.datasets;
               const t   = raw.reduce((s,d)=>s+(+d.data[ctx.dataIndex]||0), 0);
               if (t < 0.01) return '';
-              return isPct ? `${Math.round(t)}%` : (t>=1000?`${(t/1000).toFixed(0)}k€`:`${Math.round(t)}€`);
+              return isPct ? `${fmt(t,1)}%` : (t>=1000?`${(t/1000).toFixed(0)}k€`:`${Math.round(t)}€`);
             },
             anchor:'end', align:'end', offset:2,
             color:'#e2e8f0', font:{size:9, weight:'600'},
           },
           tooltip:{ mode:'index', intersect:false,
             callbacks:{
-              label: i => isPct ? `${i.dataset.label}: ${fmt(i.raw,1)}%` : `${i.dataset.label}: ${fmtEur(i.raw)}`,
+              label: i => isPct
+                ? `${i.dataset.label}: ${fmt(i.raw,1)}% du CA`
+                : `${i.dataset.label}: ${fmtEur(i.raw)}`,
               footer: items => {
                 const t = items.reduce((s,i)=>s+i.raw, 0);
-                return isPct ? `Total : ${Math.round(t)}%` : `Total : ${fmtEur(t)}`;
+                const mi = items[0]?.dataIndex ?? 0;
+                if (isPct) {
+                  const ca = caByMonth[mi];
+                  return `Total : ${fmt(t,1)}% du CA (${ca>0?fmtEur(ca):'?'})`;
+                }
+                return `Total : ${fmtEur(t)}`;
               },
             }
           }
@@ -1869,9 +1885,9 @@ async function _drawEvolChart(canvasId, section, year, colors, opts={}) {
           x:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'}, ticks:{color:'#64748b',font:{size:10}} },
           y:{ stacked:true, grid:{color:'rgba(45,49,72,0.5)'},
             ticks:{ color:'#64748b', font:{size:10},
-              callback: v => isPct ? `${v}%` : (v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`) },
+              callback: v => isPct ? `${fmt(v,0)}%` : (v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`) },
             beginAtZero:true,
-            max: isPct ? 100 : undefined }
+            max: undefined }
         }
       }
     });
@@ -1980,12 +1996,20 @@ async function renderModalCharges(d, charges) {
     const POLE_LABELS   = {2:'Acquisition',3:'Sales & Closing',4:'Opérationnel',5:'Structure'};
     const POLE_COLORS_ARR = ['#60a5fa','#a78bfa','#4ade80','#fb923c'];
 
-    const allEvol = await Promise.all(
-      POLE_SECTIONS.map(s => fetch(`${API}/api/pl_section?section=${s}&year=${year}`).then(r=>r.json()))
-    );
+    const [caEvolData, ...allEvol] = await Promise.all([
+      fetch(`${API}/api/pl_section?section=1&year=${year}`).then(r=>r.json()),
+      ...POLE_SECTIONS.map(s => fetch(`${API}/api/pl_section?section=${s}&year=${year}`).then(r=>r.json()))
+    ]);
 
     const months = allEvol[0].months || [];
     const labels = months.map(m => MONTH_LBL[+m.slice(5,7)-1]);
+
+    // CA par mois pour mode %
+    const caByMonthCh = months.map(m => {
+      const idx = (caEvolData.months||[]).indexOf(m);
+      if (idx < 0) return 0;
+      return (caEvolData.postes||[]).reduce((s,p)=>s+((caEvolData.by_poste[p]||[])[idx]||0), 0);
+    });
 
     // Datasets : 1 par pôle (total de la section pour ce mois)
     const datasets = allEvol.map((evol, i) => ({
@@ -2039,29 +2063,34 @@ async function renderModalCharges(d, charges) {
         const isPct = view === 'pct';
         const ds = POLE_SECTIONS.map((s,i) => {
           const raw = synthEvol.by_poste[POLE_LABELS[s]] || [];
-          const data = isPct ? raw.map((v,mi)=>{ const t=POLE_SECTIONS.reduce((ss,_,j)=>ss+((synthEvol.by_poste[POLE_LABELS[POLE_SECTIONS[j]]]||[])[mi]||0),0); return t>0?+(v/t*100).toFixed(1):0; }) : raw;
+          const data = isPct
+            ? raw.map((v,mi)=>{ const ca=caByMonthCh[mi]; return ca>0?+(Math.abs(v)/ca*100).toFixed(1):0; })
+            : raw;
           return { label:POLE_LABELS[s], data, backgroundColor:POLE_COLORS_ARR[i], stack:'stack' };
         });
-        const nbDs = ds.length;
+        const nbDs2 = ds.length;
         chartInst = new Chart(canvasEl.getContext('2d'), {
           type:'bar', data:{labels:labels2, datasets:ds},
           options:{ responsive:true, maintainAspectRatio:false,
             plugins:{
               legend:{ display:true, position:'bottom', labels:{color:'#94a3b8',font:{size:9},boxWidth:10,padding:6} },
               datalabels:{
-                display:ctx=>ctx.datasetIndex===nbDs-1,
-                formatter:(val,ctx)=>{ const t=ctx.chart.data.datasets.reduce((s,d)=>s+(+d.data[ctx.dataIndex]||0),0); return t<0.01?'':(isPct?`${Math.round(t)}%`:(t>=1000?`${(t/1000).toFixed(0)}k€`:`${Math.round(t)}€`)); },
+                display:ctx=>ctx.datasetIndex===nbDs2-1,
+                formatter:(val,ctx)=>{ const t=ctx.chart.data.datasets.reduce((s,d)=>s+(+d.data[ctx.dataIndex]||0),0); return t<0.01?'':(isPct?`${fmt(t,1)}%`:(t>=1000?`${(t/1000).toFixed(0)}k€`:`${Math.round(t)}€`)); },
                 anchor:'end',align:'end',offset:2,color:'#e2e8f0',font:{size:9,weight:'600'},
               },
               tooltip:{ mode:'index', intersect:false,
-                callbacks:{ label:i=>isPct?`${i.dataset.label}: ${fmt(i.raw,1)}%`:`${i.dataset.label}: ${fmtEur(i.raw)}`, footer:items=>{ const t=items.reduce((s,i)=>s+i.raw,0); return isPct?`Total: ${Math.round(t)}%`:`Total: ${fmtEur(t)}`; } }
+                callbacks:{
+                  label:i=>isPct?`${i.dataset.label}: ${fmt(i.raw,1)}% du CA`:`${i.dataset.label}: ${fmtEur(i.raw)}`,
+                  footer:items=>{ const t=items.reduce((s,i)=>s+i.raw,0); const mi=items[0]?.dataIndex??0; return isPct?`Total charges: ${fmt(t,1)}% du CA (CA=${fmtEur(caByMonthCh[mi])})`:`Total: ${fmtEur(t)}`; }
+                }
               }
             },
             onClick:(event)=>{ if(!chartInst) return; const pts=chartInst.getElementsAtEventForMode(event,'index',{intersect:false},true); if(pts.length) _updDonut(pts[0].index); },
             onHover:(event)=>{ const pts=chartInst?.getElementsAtEventForMode(event,'index',{intersect:false},true); canvasEl.style.cursor=pts?.length?'pointer':'default'; },
             scales:{
               x:{stacked:true,grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10}}},
-              y:{stacked:true,grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10},callback:v=>isPct?`${v}%`:(v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`)},beginAtZero:true,max:isPct?100:undefined}
+              y:{stacked:true,grid:{color:'rgba(45,49,72,0.5)'},ticks:{color:'#64748b',font:{size:10},callback:v=>isPct?`${fmt(v,0)}%`:(v>=1000?`${(v/1000).toFixed(0)}k€`:`${v}€`)},beginAtZero:true}
             }
           }
         });

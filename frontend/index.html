@@ -1444,11 +1444,19 @@ function renderPL(plData, kpis) {
       </tr>`;
 
       // ── Ligne Remboursements / Avoirs ──
+      // ca est déjà NET (pl_daily nettte crédits - débits).
+      // On reconstitue le BRUT = ca + remboursements pour afficher correctement.
       const remb      = state.avoirs?.remboursements_encaisses;
       const rembTotal = remb?.total || 0;
       if (rembTotal > 0) {
         const rembDisplay = showHt ? rembTotal / 1.20 : rembTotal;
-        const rembPct = fmt(rembDisplay / ca * 100, 1);
+        const grossCa = ca + rembDisplay;          // CA brut avant remboursements
+        const rembPct = fmt(rembDisplay / grossCa * 100, 1);
+        // Réafficher le TOTAL CA avec le brut
+        html = html.replace(
+          `>${fmtEur(ca)}</td><td>100%</td>`,
+          `>${fmtEur(grossCa)}</td><td>100%</td>`
+        );
         html += `<tr class="pl-row" onclick="openAvoirsModal()" style="cursor:pointer">
           <td style="color:#f87171">↩ Remboursements clients
             <span style="font-size:10px;color:#64748b;margin-left:6px">${remb.count} remb. · cliquer pour détail</span>
@@ -1456,11 +1464,11 @@ function renderPL(plData, kpis) {
           <td style="color:#f87171;font-weight:600">— ${fmtEur(rembDisplay)}</td>
           <td style="color:#64748b">${rembPct}%</td>
         </tr>`;
-        const caNet = ca - rembDisplay;
+        const caNet = grossCa - rembDisplay;  // = ca (net exact)
         html += `<tr class="subtotal">
           <td style="color:#94a3b8">CA Net de remboursements</td>
           <td class="${caNet >= 0 ? 'positive' : 'negative'}" style="font-weight:700">${fmtEur(caNet)}</td>
-          <td style="color:#64748b">${fmt(caNet/ca*100,1)}%</td>
+          <td style="color:#64748b">${fmt(caNet/grossCa*100,1)}%</td>
         </tr>`;
       }
 

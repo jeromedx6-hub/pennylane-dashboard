@@ -230,6 +230,11 @@ def compute_pl_daily(sb, mapping, target_date, cat_families: Optional[dict] = No
 
     aggregated = {}
     for tx in rows:
+        # Refund en credit = remboursement reçu → traiter comme débit négatif sur le CA
+        label_lower = (tx.get("label") or "").lower()
+        if tx.get("direction") == "credit" and label_lower.startswith("refund"):
+            tx = dict(tx, direction="debit", amount=-(float(tx.get("amount") or 0)), amount_ht=-(float(tx.get("amount_ht") or tx.get("amount") or 0)))
+
         m = mapping.get(tx.get("category_name", ""))
         if not m or m.get("pl_section") is None:
             # Classer dans Divers si la famille n'est pas technique

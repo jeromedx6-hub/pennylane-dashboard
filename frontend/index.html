@@ -1943,7 +1943,7 @@ function _drawKpiBar(canvasId, evolRows, field, opts={}) {
 
   // Donut initial sur le mois sélectionné
   if (opts.donutId) {
-    const curMo = (state.selectedMonth||'').slice(0,7);
+    const curMo = (state.month||'').slice(0,7);
     let idx = evolRows.findIndex(r => r.month.slice(0,7)===curMo);
     if (idx < 0) idx = evolRows.length - 1;
     _updDonut(Math.max(0, idx));
@@ -2045,7 +2045,7 @@ async function _drawEvolChart(canvasId, section, year, colors, opts={}) {
   }
 
   if (opts.donutId) {
-    const curMoStr = (state.selectedMonth||'').slice(0,7);
+    const curMoStr = (state.month||'').slice(0,7);
     let initIdx = allMonths.findIndex(m=>m===curMoStr);
     if (initIdx < 0) {
       initIdx = allMonths.reduce((b,m,i) => {
@@ -2063,7 +2063,7 @@ async function renderModalCA(d) {
   const pl = (state.pl || []).filter(r => r.pl_section===1 && r.is_revenue)
                              .sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
   const total = d.ca_ht;
-  const year  = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
+  const year  = (state.month||'').slice(0,4) || new Date().getFullYear();
   const COLORS_CA = ['#4ade80','#34d399','#6ee7b7','#a7f3d0','#10b981','#059669','#047857'];
 
   let html = `<div class="modal-kpi-row">
@@ -2129,7 +2129,7 @@ async function renderModalCharges(d, charges) {
 
   // ── Évolution mensuelle total charges (stacké par pôle, clic → donut) ─
   try {
-    const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
+    const year = (state.month||'').slice(0,4) || new Date().getFullYear();
     const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
     const POLE_SECTIONS = [2,3,4,5];
     const POLE_LABELS   = {2:'Acquisition',3:'Sales & Closing',4:'Opérationnel',5:'Structure'};
@@ -2239,7 +2239,7 @@ async function renderModalCharges(d, charges) {
       window._evolViewHandlers['charges-toggle'] = (view) => { currentView=view; _buildChargesChart(view); };
 
       // Donut initial
-      const curMoStr = (state.selectedMonth||'').slice(0,7);
+      const curMoStr = (state.month||'').slice(0,7);
       let initIdx = months.findIndex(m=>m===curMoStr);
       if (initIdx<0) initIdx = months.reduce((b,m,i)=>{ const t=POLE_SECTIONS.reduce((s,_,j)=>s+((synthEvol.by_poste[POLE_LABELS[POLE_SECTIONS[j]]]||[])[i]||0),0); return t>0?i:b; },0);
       _updDonut(initIdx);
@@ -2248,7 +2248,7 @@ async function renderModalCharges(d, charges) {
 }
 
 async function renderModalEbitda(d) {
-  const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
+  const year = (state.month||'').slice(0,4) || new Date().getFullYear();
   const evolData = (state.evol||[]).filter(r=>r.ca_ht>0);
   const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
   const POLE_COLORS = ['#60a5fa','#a78bfa','#4ade80','#fb923c','#6366f1'];
@@ -2318,7 +2318,7 @@ async function renderModalEbitda(d) {
       ch.update('none');
     }
     // Donut initial
-    const curMoStr = (state.selectedMonth||'').slice(0,7);
+    const curMoStr = (state.month||'').slice(0,7);
     let initIdx = evolData.findIndex(r=>r.month.slice(0,7)===curMoStr);
     if (initIdx < 0) initIdx = evolData.length - 1;
     _updEbitdaDonut(Math.max(0, initIdx));
@@ -2368,7 +2368,7 @@ async function renderModalMC(d, step) {
 
   // ── Évolution stackée par poste + clic → donut du mois ──────
   try {
-    const year = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
+    const year = (state.month||'').slice(0,4) || new Date().getFullYear();
     const STACK_COLORS = ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#818cf8','#4f46e5','#7c3aed'];
     await _drawEvolChart('mc-evol-chart', section, year, STACK_COLORS,
       { donutId:'mc-donut-chart', donutColors:STACK_COLORS, toggleBtnId:'mc-toggle' });
@@ -2376,7 +2376,7 @@ async function renderModalMC(d, step) {
 }
 
 async function renderModalRoas(d) {
-  const year      = (state.selectedMonth||'').slice(0,4) || new Date().getFullYear();
+  const year      = (state.month||'').slice(0,4) || new Date().getFullYear();
   const evolData  = (state.evol||[]).filter(r=>r.ca_ht>0);
   const MONTH_LBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
   const acqRows   = (state.pl||[]).filter(r=>r.pl_section===2&&!r.is_revenue).sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));

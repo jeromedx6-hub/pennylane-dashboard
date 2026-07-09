@@ -1422,11 +1422,44 @@ function renderPL(plData, kpis) {
       // Ligne marge / EBITDA
       const mc  = mcs[s];
       const cls = mc >= 0 ? 'positive' : 'negative';
-      html += `<tr class="${isEbitda ? 'ebitda-row' : 'mc-row'}">
-        <td>${MC_LABELS[s]}</td>
-        <td class="${cls}">${fmtEur(mc)}</td>
-        <td class="${cls}">${fmtPct(mcPcts[s])}</td>
-      </tr>`;
+      if (isEbitda) {
+        // Total Charges = toutes les sections de coûts (2,3,4,5)
+        const totalCharges = (secTotals[2]||0) + (secTotals[3]||0) + (secTotals[4]||0) + (secTotals[5]||0);
+        html += `<tr class="subtotal" style="border-top:2px solid #334155">
+          <td style="color:#94a3b8;font-weight:700">Total Charges</td>
+          <td class="negative" style="font-weight:700">— ${fmtEur(totalCharges)}</td>
+          <td style="color:#64748b">${fmt(totalCharges/ca*100,1)}%</td>
+        </tr>`;
+        // Résultat Brut (ex-EBITDA)
+        html += `<tr class="ebitda-row">
+          <td>Résultat Brut</td>
+          <td class="${cls}">${fmtEur(mc)}</td>
+          <td class="${cls}">${fmtPct(mcPcts[s])}</td>
+        </tr>`;
+        // IS (Impôt sur les Sociétés) — 25% si résultat positif
+        const is = mc > 0 ? mc * 0.25 : 0;
+        const resultatNet = mc - is;
+        if (is > 0) {
+          html += `<tr class="pl-row" style="opacity:.85">
+            <td style="color:#94a3b8">IS — Impôt sur les Sociétés <span style="font-size:10px;color:#64748b;margin-left:4px">×25%</span></td>
+            <td style="color:#f87171;font-weight:600">— ${fmtEur(is)}</td>
+            <td style="color:#64748b">${fmt(is/ca*100,1)}%</td>
+          </tr>`;
+        }
+        // Résultat Net
+        const rnCls = resultatNet >= 0 ? 'positive' : 'negative';
+        html += `<tr class="ebitda-row" style="background:rgba(16,185,129,.08);border-top:2px solid #10b981">
+          <td style="color:#34d399;font-weight:700">Résultat Net</td>
+          <td class="${rnCls}" style="font-weight:700">${fmtEur(resultatNet)}</td>
+          <td class="${rnCls}">${fmt(resultatNet/ca*100,1)}%</td>
+        </tr>`;
+      } else {
+        html += `<tr class="mc-row">
+          <td>${MC_LABELS[s]}</td>
+          <td class="${cls}">${fmtEur(mc)}</td>
+          <td class="${cls}">${fmtPct(mcPcts[s])}</td>
+        </tr>`;
+      }
       // Flux internes — affichés en ligne info sous l'EBITDA, hors calcul P&L
       if (isEbitda && fluxInternes && fluxInternes.amount > 0) {
         const fiAmt = getAmt(fluxInternes);

@@ -1367,7 +1367,10 @@ function renderPL(plData, kpis) {
   const ca        = caRows.reduce((s,r) => s + getAmt(r), 0) || 1;
   const secTotals = {};
   for (const s of [2,3,4,5]) {
-    secTotals[s] = (bySection[s] || []).filter(r => !r.is_revenue).reduce((sum,r) => sum + Math.abs(getAmt(r)), 0);
+    // Les charges sont stockées en négatif (débit), les remboursements en positif (crédit).
+    // On prend le négatif de la somme nette pour obtenir la charge nette en positif.
+    const rawNet = (bySection[s] || []).filter(r => !r.is_revenue).reduce((sum,r) => sum + getAmt(r), 0);
+    secTotals[s] = -rawNet;
   }
   const mc1        = ca - secTotals[2];
   const mc2        = mc1 - secTotals[3];
@@ -1388,11 +1391,14 @@ function renderPL(plData, kpis) {
     for (const r of rows.sort((a,b)=>Math.abs(getAmt(b))-Math.abs(getAmt(a)))) {
       const amt = getAmt(r);
       const pct = fmt(Math.abs(amt)/ca*100, 1);
-      const cls = r.is_revenue ? 'positive' : '';
+      // amt > 0 pour une charge = remboursement reçu (crédit) → afficher en vert avec "+"
+      const isRefundRow = !r.is_revenue && amt > 0;
+      const cls = (r.is_revenue || isRefundRow) ? 'positive' : '';
+      const prefix = r.is_revenue ? '' : (isRefundRow ? '↩ +' : '— ');
       const posteAttr = JSON.stringify(r.poste_budgetaire).replace(/"/g, '&quot;');
       html += `<tr class="pl-row" onclick="openPlLineModal(${posteAttr}, ${!!r.is_revenue})">
-        <td>${r.poste_budgetaire}</td>
-        <td class="${cls}">${r.is_revenue ? '' : '— '}${fmtEur(Math.abs(amt))}</td>
+        <td>${r.poste_budgetaire}${isRefundRow ? ' <span style="font-size:10px;color:#64748b">(remboursement)</span>' : ''}</td>
+        <td class="${cls}">${prefix}${fmtEur(Math.abs(amt))}</td>
         <td>${pct}%</td>
       </tr>`;
     }

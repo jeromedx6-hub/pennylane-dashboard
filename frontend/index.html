@@ -453,33 +453,6 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     </div>
   </div>
 
-  <!-- Nouvelles Ventes (webhook systeme.io) -->
-  <div class="card">
-    <div class="card-header" style="margin-bottom:16px">
-      <div>
-        <div class="card-title">🏷️ &nbsp;Nouvelles Ventes</div>
-        <div class="card-sub" id="nc-sub">Via tags systeme.io — chargement…</div>
-      </div>
-      <button class="sync-btn" id="nc-refresh-btn" onclick="fetchNewClients()" style="flex-shrink:0">⟳ Actualiser</button>
-    </div>
-
-    <!-- 2 summary cards -->
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
-      <div class="kpi-card blue" style="cursor:pointer" onclick="openNcModal()">
-        <div class="kpi-hint">↗ détail</div>
-        <div class="kpi-label">Nouvelles ventes</div>
-        <div class="kpi-value" id="nc-count">—</div>
-        <div class="kpi-deltas" id="nc-sub2">—</div>
-      </div>
-      <div class="kpi-card green" style="cursor:pointer" onclick="openNcModal()">
-        <div class="kpi-hint">↗ détail</div>
-        <div class="kpi-label">CA encaissé (identifié)</div>
-        <div class="kpi-value" id="nc-ca">—</div>
-        <div class="kpi-deltas">via matching email Pennylane</div>
-      </div>
-    </div>
-  </div>
-
 </div><!-- /page-kpi -->
 
 <!-- ════ PAGE : ALERTES ════════════════════════════════════ -->
@@ -3395,21 +3368,7 @@ function renderRev30(data) {
         ${_delta(k.remboursements, ref.remboursements, true)}
       </div>
     </div>
-    <div class="kpi-card blue">
-      <div class="kpi-label">Panier Moyen</div>
-      <div class="kpi-value" style="font-size:22px">${fmtEur(k.panier_moyen)}</div>
-      <div class="kpi-deltas" style="display:flex;flex-direction:column;gap:2px">
-        <span style="font-size:10px;color:#64748b">${ref.panier_moyen ? fmtEur(ref.panier_moyen)+' réf.' : ''}</span>
-        ${_delta(k.panier_moyen, ref.panier_moyen)}
-      </div>
-    </div>
-    <div class="kpi-card orange">
-      <div class="kpi-label">Transactions Non Traitées</div>
-      <div class="kpi-value" style="font-size:28px;color:${k.tx_non_traitees>0?'#fb923c':'#4ade80'}">
-        ${k.tx_non_traitees.toLocaleString('fr-FR')}
-      </div>
-      <div class="kpi-deltas"><span style="font-size:10px;color:#64748b">sans mapping P&L</span></div>
-    </div>`;
+    `;
 
   // Regroupement jour ou semaine
   const isWeek  = rev30View === 'week';

@@ -2754,22 +2754,22 @@ function downloadAllTx() {
   _buildAndDownloadCsv(allTxs, `${label}_${year}.csv`);
 }
 
-function openAvoirsModal() {
-  const av = state.avoirs;
-  if (!av) return;
-  const remb = av.remboursements_encaisses || {};
+async function openAvoirsModal() {
   const year = state.month.slice(0, 4);
-
-  // Ouvrir squelette modal (même pattern que les autres lignes P&L)
   _plModalSkeleton('↩ Remboursements clients', year);
 
-  // Construire données mois/mois (format attendu par _renderPlLineContent)
+  // Fetch pour toute l'année (state.avoirs ne couvre que le mois sélectionné)
+  const av = await fetch(`${API}/api/avoirs?date_from=${year}-01-01&date_to=${year}-12-31`)
+    .then(r => r.json()).catch(() => null);
+  if (!av) return;
+
+  const remb = av.remboursements_encaisses || {};
+
   const byMonthMap = {};
   for (const m of (remb.by_month || [])) {
     byMonthMap[m.month] = { amount: m.amount, tx_count: m.tx_count };
   }
 
-  // Remplir les 12 mois de l'année avec YTD cumulé
   const months = [];
   let ytd = 0;
   for (let i = 1; i <= 12; i++) {
@@ -2779,7 +2779,6 @@ function openAvoirsModal() {
     months.push({ month: key, amount: val.amount, tx_count: val.tx_count, ytd });
   }
 
-  // Adapter les transactions pour _renderPlLineContent (besoin de .date, .label, .amount)
   const txs = (remb.detail || []).map(t => ({
     date:          t.date,
     label:         t.name || t.email || t.label || '—',
@@ -2788,7 +2787,7 @@ function openAvoirsModal() {
     direction:     'debit',
   }));
 
-  _renderPlLineContent(months, false /* is_expense */, year, txs);
+  _renderPlLineContent(months, false, year, txs);
 }
 
 function openGenericModal(title, bodyHtml) {

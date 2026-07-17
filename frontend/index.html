@@ -453,6 +453,19 @@ body { font-family:-apple-system,'Inter',sans-serif; background:#0f1117; color:#
     </div>
   </div>
 
+  <!-- Histogramme CA par famille produit -->
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-header">
+      <div>
+        <div class="card-title">CA encaissé · Par famille produit</div>
+        <div class="card-sub" id="rev-family-sub">—</div>
+      </div>
+    </div>
+    <div style="position:relative;height:300px;padding-bottom:8px">
+      <canvas id="chart-rev-family"></canvas>
+    </div>
+  </div>
+
 </div><!-- /page-kpi -->
 
 <!-- ════ PAGE : ALERTES ════════════════════════════════════ -->
@@ -3308,6 +3321,7 @@ async function fetchRev30() {
     const json = await res.json();
     rev30Data  = json;
     renderRev30();
+    if (json?.period) fetchRevFamily(json.period.from, json.period.to);
   } catch(e) {
     console.error('revenue_30d error', e);
   }
@@ -3476,6 +3490,84 @@ function renderRev30(data) {
           },
           beginAtZero: true,
         }
+      }
+    }
+  });
+}
+
+// ── CA par famille produit ────────────────────────────────────
+let chartRevFamily = null;
+
+const FAMILY_COLORS = {
+  'Alchimiste': 'rgba(99,102,241,0.8)',
+  'Académie':   'rgba(16,185,129,0.8)',
+  'Apprenti':   'rgba(251,191,36,0.8)',
+  'Cure':       'rgba(236,72,153,0.8)',
+  'Event':      'rgba(245,158,11,0.8)',
+  'E-learning': 'rgba(59,130,246,0.8)',
+  'Autres':     'rgba(100,116,139,0.6)',
+};
+
+async function fetchRevFamily(dateFrom, dateTo) {
+  const canvasEl = document.getElementById('chart-rev-family');
+  if (!canvasEl) return;
+  try {
+    const res  = await fetch(`${API}/api/revenue_by_family?date_from=${dateFrom}&date_to=${dateTo}`);
+    const json = await res.json();
+    renderRevFamily(json, dateFrom, dateTo);
+  } catch(e) { console.error('revenue_by_family error', e); }
+}
+
+function renderRevFamily(data, dateFrom, dateTo) {
+  const ctx = document.getElementById('chart-rev-family')?.getContext('2d');
+  if (!ctx || !data?.series?.length) return;
+
+  const fmtD = iso => {
+    const [,m,dd] = iso.split('-');
+    const mo = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'][+m-1];
+    return `${+dd} ${mo}`;
+  };
+  const sub = document.getElementById('rev-family-sub');
+  if (sub) sub.textContent = `${fmtD(dateFrom)} → ${fmtD(dateTo)}`;
+
+  const labels   = data.series.map(d => { const [,m,dd]=d.date.split('-'); return `${+dd}/${m}`; });
+  const families = data.families;
+
+  const datasets = families.map(fam => ({
+    label: fam,
+    data:  data.series.map(d => d[fam] || 0),
+    backgroundColor: FAMILY_COLORS[fam] || 'rgba(148,163,184,0.6)',
+    borderColor:     (FAMILY_COLORS[fam] || 'rgba(148,163,184,0.6)').replace('0.8','1').replace('0.6','1'),
+    borderWidth: 1,
+    borderRadius: 2,
+    stack: 'ca',
+  }));
+
+  if (chartRevFamily) chartRevFamily.destroy();
+  chartRevFamily = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 14, padding: 16 } },
+        datalabels: { display: false },
+        tooltip: {
+          mode: 'index',
+          callbacks: {
+            title: items => new Date(data.series[items[0].dataIndex].date + 'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'}),
+            label: item => item.raw > 0 ? `${item.dataset.label} : ${fmtEur(item.raw)}` : null,
+            footer: items => {
+              const total = items.reduce((s,i) => s + (i.raw||0), 0);
+              return total > 0 ? `Total : ${fmtEur(total)}` : '';
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, grid: { color: 'rgba(45,49,72,0.5)' }, ticks: { color: '#64748b', font: { size: 10 }, maxRotation: 45 } },
+        y: { stacked: true, grid: { color: 'rgba(45,49,72,0.5)' }, ticks: { color: '#64748b', font: { size: 11 }, callback: v => v >= 1000 ? `${(v/1000).toFixed(0)}k€` : `${v}€` }, beginAtZero: true }
       }
     }
   });

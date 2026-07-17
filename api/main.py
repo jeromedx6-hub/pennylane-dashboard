@@ -1881,6 +1881,55 @@ def get_revenue_30d(month: str = Query(default=None)):
     }
 
 
+@app.get("/api/revenue_by_family")
+def get_revenue_by_family(
+    date_from: str = Query(...),
+    date_to:   str = Query(...),
+):
+    """
+    CA quotidien décomposé par famille produit (axe3_analytics).
+    Retourne: {families: [...], series: [{date, Alchimiste, Académie, ...}, ...]}
+    """
+    rows = (
+        sb.table("pl_daily")
+        .select("date,axe3_analytics,amount_ht")
+        .eq("is_revenue", True)
+        .gte("date", date_from)
+        .lte("date", date_to)
+        .execute().data
+    )
+
+    # Famille → montant par jour
+    by_date: dict = {}
+    families_set: set = set()
+    for r in rows:
+        d   = r["date"]
+        fam = r.get("axe3_analytics") or "Autres"
+        amt = float(r.get("amount_ht") or 0)
+        if d not in by_date:
+            by_date[d] = {}
+        by_date[d][fam] = by_date[d].get(fam, 0.0) + amt
+        families_set.add(fam)
+
+    # Ordre fixe des familles (plus grand volume en premier)
+    family_totals = {}
+    for day_data in by_date.values():
+        for fam, amt in day_data.items():
+            family_totals[fam] = family_totals.get(fam, 0.0) + amt
+    families = sorted(families_set, key=lambda f: -family_totals.get(f, 0))
+
+    # Construire la série jour par jour
+    all_dates = sorted(by_date.keys())
+    series = []
+    for d in all_dates:
+        entry = {"date": d}
+        for fam in families:
+            entry[fam] = round(by_date[d].get(fam, 0.0), 2)
+        series.append(entry)
+
+    return {"families": families, "series": series}
+
+
 @app.get("/api/revenue_avg3m")
 def get_revenue_avg3m(month: str = Query(default=None)):
     """

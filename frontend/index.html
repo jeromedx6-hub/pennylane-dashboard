@@ -3258,7 +3258,10 @@ function setRev30View(view) {
   document.getElementById('btn-view-week').style.color      = view === 'week' ? '#fff' : '#475569';
   const titleEl = document.getElementById('rev30-chart-title');
   if (titleEl) titleEl.textContent = view === 'week' ? 'CA encaissé · Semaine par semaine' : 'CA encaissé · Jour par jour';
-  if (rev30Data) renderRev30(rev30Data);
+  if (rev30Data) {
+    renderRev30(rev30Data);
+    if (rev30Data.period) fetchRevFamily(rev30Data.period.from, rev30Data.period.to);
+  }
 }
 
 // Regroupe les données daily en semaines ISO (lundi → dimanche)
@@ -3511,8 +3514,9 @@ const FAMILY_COLORS = {
 async function fetchRevFamily(dateFrom, dateTo) {
   const canvasEl = document.getElementById('chart-rev-family');
   if (!canvasEl) return;
+  const groupBy = rev30View === 'week' ? 'week' : 'day';
   try {
-    const res  = await fetch(`${API}/api/revenue_by_family?date_from=${dateFrom}&date_to=${dateTo}`);
+    const res  = await fetch(`${API}/api/revenue_by_family?date_from=${dateFrom}&date_to=${dateTo}&group_by=${groupBy}`);
     const json = await res.json();
     renderRevFamily(json, dateFrom, dateTo);
   } catch(e) { console.error('revenue_by_family error', e); }
@@ -3530,7 +3534,15 @@ function renderRevFamily(data, dateFrom, dateTo) {
   const sub = document.getElementById('rev-family-sub');
   if (sub) sub.textContent = `${fmtD(dateFrom)} → ${fmtD(dateTo)}`;
 
-  const labels   = data.series.map(d => { const [,m,dd]=d.date.split('-'); return `${+dd}/${m}`; });
+  const isWeek = rev30View === 'week';
+  const labels = data.series.map(d => {
+    const [,ms,ds] = d.date.split('-');
+    if (isWeek && d.end) {
+      const [,me,de] = d.end.split('-');
+      return `${+ds}/${ms}–${+de}/${me}`;
+    }
+    return `${+ds}/${ms}`;
+  });
   const families = data.families;
 
   const datasets = families.map(fam => ({

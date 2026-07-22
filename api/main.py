@@ -1885,11 +1885,14 @@ def get_revenue_30d(month: str = Query(default=None)):
 def get_revenue_by_family(
     date_from: str = Query(...),
     date_to:   str = Query(...),
+    group_by:  str = Query(default="day"),   # "day" | "week"
 ):
     """
-    CA quotidien décomposé par famille produit (axe3_analytics).
-    Retourne: {families: [...], series: [{date, Alchimiste, Académie, ...}, ...]}
+    CA décomposé par famille produit (axe3_analytics), groupé par jour ou semaine.
+    Retourne: {families: [...], series: [{date, end?, Alchimiste, Académie, ...}, ...]}
     """
+    from datetime import date as _date, timedelta
+
     rows = (
         sb.table("pl_daily")
         .select("date,axe3_analytics,amount_ht")
@@ -1899,32 +1902,42 @@ def get_revenue_by_family(
         .execute().data
     )
 
-    # Famille → montant par jour
-    by_date: dict = {}
+    def _week_key(d_str: str) -> str:
+        d = _date.fromisoformat(d_str)
+        monday = d - timedelta(days=d.weekday())
+        return monday.isoformat()
+
+    # Famille → montant par période
+    by_period: dict = {}
+    period_end: dict = {}   # period_key → last date seen
     families_set: set = set()
     for r in rows:
         d   = r["date"]
         fam = r.get("axe3_analytics") or "Autres"
         amt = float(r.get("amount_ht") or 0)
-        if d not in by_date:
-            by_date[d] = {}
-        by_date[d][fam] = by_date[d].get(fam, 0.0) + amt
+        key = _week_key(d) if group_by == "week" else d
+        if key not in by_period:
+            by_period[key] = {}
+        by_period[key][fam] = by_period[key].get(fam, 0.0) + amt
+        # Garder la dernière date de la période pour affichage
+        if key not in period_end or d > period_end[key]:
+            period_end[key] = d
         families_set.add(fam)
 
-    # Ordre fixe des familles (plus grand volume en premier)
-    family_totals = {}
-    for day_data in by_date.values():
-        for fam, amt in day_data.items():
+    # Ordre des familles par volume total
+    family_totals: dict = {}
+    for pd_data in by_period.values():
+        for fam, amt in pd_data.items():
             family_totals[fam] = family_totals.get(fam, 0.0) + amt
     families = sorted(families_set, key=lambda f: -family_totals.get(f, 0))
 
-    # Construire la série jour par jour
-    all_dates = sorted(by_date.keys())
     series = []
-    for d in all_dates:
-        entry = {"date": d}
+    for key in sorted(by_period.keys()):
+        entry = {"date": key}
+        if group_by == "week":
+            entry["end"] = period_end[key]
         for fam in families:
-            entry[fam] = round(by_date[d].get(fam, 0.0), 2)
+            entry[fam] = round(by_period[key].get(fam, 0.0), 2)
         series.append(entry)
 
     return {"families": families, "series": series}

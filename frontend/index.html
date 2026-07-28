@@ -4135,30 +4135,93 @@ async function launchSync() {
           return;
         }
 
-        // Étape 2 : sync catégories Pennylane
+        // Étape 2 : sync catégories Pennylane (synchrone, retourne les nouvelles catégories)
         document.getElementById('sync-progress-label').textContent = '2/3 · Mise à jour des catégories Pennylane…';
-        try { await fetch(`${API}/api/sync/categories`, {method:'POST'}); } catch(e) {}
+        let catsResult = null;
+        try {
+          const r2 = await fetch(`${API}/api/sync/categories`, {method:'POST'});
+          catsResult = await r2.json();
+        } catch(e) {}
 
-        // Étape 3 : recalcul P&L
+        // Étape 3 : recalcul P&L sur la même période
         document.getElementById('sync-progress-label').textContent = '3/3 · Recalcul P&L et KPIs…';
-        try { await fetch(`${API}/api/sync/recompute-pl`, {method:'POST'}); } catch(e) {}
+        let plResult = null;
+        try {
+          const r3 = await fetch(`${API}/api/sync/recompute-pl?date_from=${from}&date_to=${to}`, {method:'POST'});
+          plResult = await r3.json();
+        } catch(e) {}
 
-        // Fin
+        // Fermer modal sync + refresh
         document.getElementById('sync-modal').classList.remove('open');
         _setSyncBtns(false);
         loadSyncVersion();
-        showToast(`✅ Sync complet · transactions + catégories + P&L`, 'success');
 
         // Refresh page active
-        const cfg = PAGE_CONFIG[_currentPage];
         if (_currentPage === 'indicateurs') fetchAll();
         else if (_currentPage === 'kpi')    { fetchRev30(); fetchNewClients(); }
         else if (_currentPage === 'alertes') loadAlerts();
         else if (_currentPage === 'mapping') loadMappingStatus();
         else if (_currentPage === 'crm')    fetchCRM();
+
+        // Popup de synthèse
+        _showSyncSummary(s, catsResult, plResult, from, to);
       }
     } catch(e) { /* ignore erreurs réseau transitoires */ }
   }, 2000);
+}
+
+function _showSyncSummary(syncState, catsResult, plResult, from, to) {
+  const audit       = syncState?.audit || {};
+  const txCount     = audit.transactions_synced ?? audit.tx_count ?? '—';
+  const unmapped    = catsResult?.unmapped || [];
+  const newCats     = catsResult?.stats?.new_categories ?? 0;
+  const daysRecomp  = plResult?.days_recomputed ?? '—';
+
+  const unmappedHtml = unmapped.length
+    ? unmapped.slice(0, 10).map(c =>
+        `<div style="display:flex;justify-content:space-between;padding:4px 8px;background:#1a1d27;border-radius:4px;margin-bottom:3px">
+          <span style="color:#e2e8f0;font-size:11px">${c.label}</span>
+          <span style="color:#64748b;font-size:10px">${c.family_label || '—'}</span>
+        </div>`).join('')
+      + (unmapped.length > 10 ? `<div style="color:#64748b;font-size:10px;margin-top:4px">…et ${unmapped.length-10} autres</div>` : '')
+    : `<div style="color:#4ade80;font-size:11px">✅ Toutes les catégories sont mappées</div>`;
+
+  const body = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px">
+      <div style="background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#6366f1">${txCount}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:4px">Transactions<br>synchronisées</div>
+      </div>
+      <div style="background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:700;color:${newCats>0?'#f59e0b':'#4ade80'}">${newCats}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:4px">Nouvelles<br>catégories</div>
+      </div>
+      <div style="background:#12141e;border:1px solid #2d3148;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#34d399">${daysRecomp}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:4px">Jours P&L<br>recalculés</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
+        Catégories non mappées ${unmapped.length>0?`<span style="color:#f59e0b">(${unmapped.length})</span>`:''}
+      </div>
+      ${unmappedHtml}
+    </div>
+
+    ${unmapped.length > 0 ? `<div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;margin-bottom:16px">
+      ⚠ ${unmapped.length} catégorie${unmapped.length>1?'s':''} non mappée${unmapped.length>1?'s':''} — va dans <strong>Mapping → Alertes</strong> pour les configurer et relancer un recalcul.
+    </div>` : ''}
+
+    <div style="font-size:10px;color:#475569;margin-bottom:16px">Période : ${from} → ${to}</div>
+
+    <button onclick="document.getElementById('sync-summary-modal').classList.remove('open')"
+      style="width:100%;padding:11px;background:#6366f1;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+      ✅ Valider
+    </button>`;
+
+  document.getElementById('sync-summary-body').innerHTML = body;
+  document.getElementById('sync-summary-modal').classList.add('open');
 }
 
 function _setSyncBtns(running) {
@@ -4270,6 +4333,16 @@ function showToast(msg, type = 'success') {
       <span id="uncateg-modal-footer"></span>
       <span style="color:#94a3b8">Données Pennylane</span>
     </div>
+  </div>
+</div>
+
+<!-- ── Modal Synthèse Sync ─────────────────────────────── -->
+<div class="modal-overlay" id="sync-summary-modal" onclick="this.classList.remove('open')">
+  <div class="modal" style="width:460px;max-width:95vw" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="document.getElementById('sync-summary-modal').classList.remove('open')">✕</button>
+    <div class="modal-title">Synthèse du recalcul</div>
+    <div class="modal-sub" style="margin-bottom:20px">Résultats des 3 étapes · Sync + Catégories + P&L</div>
+    <div id="sync-summary-body"></div>
   </div>
 </div>
 

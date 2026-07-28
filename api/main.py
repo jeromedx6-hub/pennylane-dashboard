@@ -1279,14 +1279,16 @@ def trigger_sync(
     d_to   = date.fromisoformat(date_to)   if date_to   else today
     d_from = date.fromisoformat(date_from) if date_from else d_to - timedelta(days=60)
 
+    # Marquer running=True AVANT de démarrer le thread (évite la race condition avec le poll)
+    with _sync_lock:
+        _sync_state["running"]     = True
+        _sync_state["started_at"]  = _dt.now().strftime("%H:%M:%S")
+        _sync_state["finished_at"] = None
+        _sync_state["error"]       = None
+        _sync_state["date_from"]   = d_from.isoformat()
+        _sync_state["date_to"]     = d_to.isoformat()
+
     def _run():
-        with _sync_lock:
-            _sync_state["running"]     = True
-            _sync_state["started_at"]  = _dt.now().strftime("%H:%M:%S")
-            _sync_state["finished_at"] = None
-            _sync_state["error"]       = None
-            _sync_state["date_from"]   = d_from.isoformat()
-            _sync_state["date_to"]     = d_to.isoformat()
         try:
             import sync as _sync_mod
             audit = _sync_mod.run(d_from, d_to)

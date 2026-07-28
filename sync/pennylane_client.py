@@ -17,7 +17,7 @@ class PennylaneClient:
 
     def _get(self, endpoint: str, params: dict = None) -> dict:
         url = f"{BASE_URL}/{endpoint}"
-        resp = self.session.get(url, params=params)
+        resp = self.session.get(url, params=params, timeout=30)
         resp.raise_for_status()
         return resp.json()
 

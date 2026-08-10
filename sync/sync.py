@@ -686,25 +686,36 @@ def sync_pennylane_categories(token, sb, mapping):
 
 # ── TVA réelle depuis supplier_invoices ───────────────────────────────────
 
-def fetch_supplier_invoice_tva_overrides(token: str, date_from, date_to) -> dict:
+def fetch_supplier_invoice_tva_overrides(token: str, date_from, date_to,
+                                         pl_transactions: list = None) -> dict:
     """
-    Récupère le taux TVA réel par transaction depuis les factures fournisseur reconciliées.
-    Retourne un dict {tx_id → tva_rate} pour corriger les prestataires étrangers (0% TVA).
+    Retourne un dict {tx_id → tva_rate réelle} pour toutes les factures fournisseur
+    reconciliées sur la période.
 
-    Pennylane stocke currency_tax / currency_amount_before_tax sur chaque facture.
-    Pour les prestataires étrangers : currency_tax = 0.0 → tva_rate = 0.0.
+    Couvre tous les cas d'exonération TVA sans distinction :
+      - Auto-entrepreneurs (franchise en base, TVA = 0)
+      - Prestataires étrangers (auto-liquidation, TVA = 0)
+      - SaaS étrangers sans établissement FR (reverse charge, TVA = 0)
+      - Taux réduits (7%, 10%) ou non-standards
+
+    Méthode de matching (sans N+1 API calls) :
+      On enrichit la fenêtre ±7j pour attraper les décalages date-facture/date-virement,
+      puis on matche par montant TTC exact.  En cas de doublon de montant, la date la
+      plus proche gagne.  Si pl_transactions est fourni (déjà chargé), on évite un
+      deuxième appel API Pennylane.
     """
+    from datetime import timedelta as _td
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     base = "https://app.pennylane.com/api/external/v2"
 
-    params = {
-        "per_page": 100,
-        "date_gte": date_from.isoformat(),
-        "date_lte": date_to.isoformat(),
-    }
+    # ── 1. Factures fournisseur sur la fenêtre (±7j de marge) ────────────
+    d_from_ext = (date_from - _td(days=7)).isoformat()
+    d_to_ext   = (date_to   + _td(days=7)).isoformat()
+    params = {"per_page": 100, "date_gte": d_from_ext, "date_lte": d_to_ext}
     invoices = []
     while True:
-        r = requests.get(f"{base}/supplier_invoices", headers=headers, params=params, timeout=30)
+        r = requests.get(f"{base}/supplier_invoices", headers=headers,
+                         params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
         invoices.extend(data.get("items", []))
@@ -713,36 +724,75 @@ def fetch_supplier_invoice_tva_overrides(token: str, date_from, date_to) -> dict
         params["cursor"] = data["next_cursor"]
         time.sleep(0.26)
 
-    overrides = {}
+    # Garder uniquement les reconciliées avec un taux TVA calculable
+    inv_useful = []
     for inv in invoices:
         if not inv.get("reconciled"):
             continue
-        amount_ht = float(inv.get("currency_amount_before_tax") or 0)
-        tax       = float(inv.get("currency_tax") or 0)
-        if amount_ht <= 0:
+        ht  = float(inv.get("currency_amount_before_tax") or 0)
+        tax = float(inv.get("currency_tax") or 0)
+        ttc = float(inv.get("currency_amount") or 0)
+        if ht <= 0 or ttc <= 0:
             continue
-        # Taux TVA réel sur la facture
-        actual_tva = round(tax / amount_ht, 4)
+        actual_tva = round(tax / ht, 4)
+        # N'override que si TVA ≠ 20% (défaut catégorie) — évite faux matches
+        if abs(actual_tva - 0.20) < 0.001:
+            continue
+        inv_useful.append({
+            "ttc": ttc, "date": inv.get("date", ""), "tva": actual_tva,
+            "label": inv.get("label", ""),
+        })
 
-        # Récupérer les transactions bancaires reconciliées avec cette facture
-        try:
-            r2 = requests.get(
-                f"{base}/supplier_invoices/{inv['id']}/matched_transactions",
-                headers=headers, timeout=30
-            )
+    if not inv_useful:
+        log.info("  supplier_invoice TVA overrides : aucune facture avec taux ≠ 20%")
+        return {}
+
+    # ── 2. Transactions bancaires de la fenêtre (depuis pl_transactions si dispo) ─
+    if pl_transactions is not None:
+        bank_txs = pl_transactions
+    else:
+        params2 = {"per_page": 100, "date_gte": date_from.isoformat(),
+                   "date_lte": date_to.isoformat()}
+        bank_txs = []
+        while True:
+            r2 = requests.get(f"{base}/transactions", headers=headers,
+                              params=params2, timeout=30)
+            r2.raise_for_status()
+            d2 = r2.json()
+            bank_txs.extend(d2.get("items", []))
+            if not d2.get("has_more"):
+                break
+            params2["cursor"] = d2["next_cursor"]
             time.sleep(0.26)
-            if not r2.ok:
-                continue
-            matched = r2.json().get("items", [])
-            for mt in matched:
-                tx_id = f"tx_{mt['id']}"
-                overrides[tx_id] = actual_tva
-        except Exception:
-            continue
 
-    changed = sum(1 for v in overrides.values() if v != 0.20)
-    log.info(f"  supplier_invoice TVA overrides : {len(overrides)} tx reconciliées, "
-             f"{changed} avec taux ≠ 20% (étrangers ou exonérés)")
+    # Index transactions par montant absolu → liste de (date, tx_id)
+    tx_by_amount: dict = {}
+    for tx in bank_txs:
+        amt = abs(float(tx.get("currency_amount") or tx.get("amount") or 0))
+        amt_key = round(amt, 2)
+        tx_by_amount.setdefault(amt_key, []).append({
+            "date": tx["date"], "id": f"tx_{tx['id']}"
+        })
+
+    # ── 3. Matching facture → transaction (montant exact, date la plus proche) ─
+    overrides = {}
+    for inv in inv_useful:
+        ttc_key = round(inv["ttc"], 2)
+        candidates = tx_by_amount.get(ttc_key, [])
+        if not candidates:
+            continue
+        # Choisir la transaction dont la date est la plus proche de la facture (±7j)
+        best = min(candidates,
+                   key=lambda c: abs((date.fromisoformat(c["date"])
+                                      - date.fromisoformat(inv["date"])).days))
+        delta = abs((date.fromisoformat(best["date"])
+                     - date.fromisoformat(inv["date"])).days)
+        if delta <= 7:
+            overrides[best["id"]] = inv["tva"]
+
+    changed = len(overrides)
+    log.info(f"  supplier_invoice TVA overrides : {len(inv_useful)} factures ≠ 20%, "
+             f"{changed} matchées → taux réel appliqué (auto-entr., étrangers, exonérés)")
     return overrides
 
 
@@ -882,9 +932,11 @@ def run(date_from=None, date_to=None):
     except Exception as e:
         log.warning(f"  enrichissement ledger_entries échoué: {e}")
 
-    # ── 3d. TVA réelle depuis supplier_invoices (prestataires étrangers) ────
+    # ── 3d. TVA réelle depuis supplier_invoices (auto-entr., étrangers, exonérés) ─
     try:
-        tva_overrides = fetch_supplier_invoice_tva_overrides(PENNYLANE_TOKEN, date_from, date_to)
+        tva_overrides = fetch_supplier_invoice_tva_overrides(
+            PENNYLANE_TOKEN, date_from, date_to, pl_transactions=transactions
+        )
     except Exception as e:
         log.warning(f"  fetch_supplier_invoice_tva_overrides échoué: {e}")
         tva_overrides = {}

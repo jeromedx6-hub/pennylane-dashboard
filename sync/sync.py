@@ -152,8 +152,16 @@ def normalize_transaction(tx, mapping=None, tva_overrides=None):
     mapping       : dict category_name → row (pour calculer amount_ht par défaut).
     tva_overrides : dict tx_id → tva_rate réelle (depuis supplier_invoices, prioritaire).
     """
-    amount    = float(tx.get("currency_amount") or tx.get("amount") or 0)
-    direction = "credit" if amount >= 0 else "debit"
+    # Pour les transactions en devise étrangère (USD, CHF…), Pennylane renvoie :
+    #   currency_amount = montant en devise d'origine (ex: -115.2 USD)
+    #   amount          = montant en EUR réellement débité du compte bancaire
+    # On utilise toujours amount (EUR) ; currency_amount sert uniquement à déduire la direction.
+    currency      = tx.get("currency", "EUR") or "EUR"
+    eur_amount    = float(tx.get("amount") or 0)
+    raw_amount    = float(tx.get("currency_amount") or eur_amount)
+    # Direction depuis currency_amount (plus fiable que amount pour le signe)
+    direction     = "credit" if raw_amount >= 0 else "debit"
+    amount        = eur_amount  # toujours en EUR
 
     # Catégorie principale : poids le plus élevé HORS familles exclues (cf. EXCLUDED_FAMILY_IDS)
     # Tiebreaker : familles charges déprioritisées pour les crédits (cf. EXPENSE_FAMILY_IDS)

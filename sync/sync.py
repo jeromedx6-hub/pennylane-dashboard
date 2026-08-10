@@ -147,9 +147,10 @@ def pl_get_modified_since(token, since_dt):
 
 # ── Normalisation ──────────────────────────────────────────────────────────
 
-def normalize_transaction(tx, mapping=None):
+def normalize_transaction(tx, mapping=None, tva_overrides=None):
     """Convertit une transaction Pennylane en ligne Supabase (champs étendus).
-    mapping : dict category_name → row (optionnel, pour calculer amount_ht).
+    mapping       : dict category_name → row (pour calculer amount_ht par défaut).
+    tva_overrides : dict tx_id → tva_rate réelle (depuis supplier_invoices, prioritaire).
     """
     amount    = float(tx.get("currency_amount") or tx.get("amount") or 0)
     direction = "credit" if amount >= 0 else "debit"
@@ -176,8 +177,12 @@ def normalize_transaction(tx, mapping=None):
         category_id   = ""
         family_id     = ""
 
-    # Montant HT : amount TTC / (1 + tva_rate)
-    if mapping and category_name and category_name in mapping:
+    # Montant HT : utilise le taux TVA réel de la facture fournisseur si disponible,
+    # sinon le taux par défaut de la catégorie (peut être erroné pour prestataires étrangers).
+    tx_id = f"tx_{tx['id']}"
+    if tva_overrides and tx_id in tva_overrides:
+        tva_rate = tva_overrides[tx_id]   # taux réel issu de la facture Pennylane
+    elif mapping and category_name and category_name in mapping:
         tva_rate = float(mapping[category_name].get("tva_rate") or 0.20)
     else:
         tva_rate = 0.20   # défaut si catégorie inconnue
@@ -679,6 +684,68 @@ def sync_pennylane_categories(token, sb, mapping):
     return {"total": len(cats), "unmapped": total_unmapped, "new": len(newly_unmapped)}
 
 
+# ── TVA réelle depuis supplier_invoices ───────────────────────────────────
+
+def fetch_supplier_invoice_tva_overrides(token: str, date_from, date_to) -> dict:
+    """
+    Récupère le taux TVA réel par transaction depuis les factures fournisseur reconciliées.
+    Retourne un dict {tx_id → tva_rate} pour corriger les prestataires étrangers (0% TVA).
+
+    Pennylane stocke currency_tax / currency_amount_before_tax sur chaque facture.
+    Pour les prestataires étrangers : currency_tax = 0.0 → tva_rate = 0.0.
+    """
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    base = "https://app.pennylane.com/api/external/v2"
+
+    params = {
+        "per_page": 100,
+        "date_gte": date_from.isoformat(),
+        "date_lte": date_to.isoformat(),
+    }
+    invoices = []
+    while True:
+        r = requests.get(f"{base}/supplier_invoices", headers=headers, params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        invoices.extend(data.get("items", []))
+        if not data.get("has_more"):
+            break
+        params["cursor"] = data["next_cursor"]
+        time.sleep(0.26)
+
+    overrides = {}
+    for inv in invoices:
+        if not inv.get("reconciled"):
+            continue
+        amount_ht = float(inv.get("currency_amount_before_tax") or 0)
+        tax       = float(inv.get("currency_tax") or 0)
+        if amount_ht <= 0:
+            continue
+        # Taux TVA réel sur la facture
+        actual_tva = round(tax / amount_ht, 4)
+
+        # Récupérer les transactions bancaires reconciliées avec cette facture
+        try:
+            r2 = requests.get(
+                f"{base}/supplier_invoices/{inv['id']}/matched_transactions",
+                headers=headers, timeout=30
+            )
+            time.sleep(0.26)
+            if not r2.ok:
+                continue
+            matched = r2.json().get("items", [])
+            for mt in matched:
+                tx_id = f"tx_{mt['id']}"
+                overrides[tx_id] = actual_tva
+        except Exception:
+            continue
+
+    changed = sum(1 for v in overrides.values() if v != 0.20)
+    log.info(f"  supplier_invoice TVA overrides : {len(overrides)} tx reconciliées, "
+             f"{changed} avec taux ≠ 20% (étrangers ou exonérés)")
+    return overrides
+
+
 # ── Customer invoices ─────────────────────────────────────────────────────
 
 def sync_customer_invoices(token, sb, date_from, date_to):
@@ -764,10 +831,13 @@ def run(date_from=None, date_to=None):
     # ── 3b. Re-fetch des transactions sans catégorie ───────────────────────
     # Pennylane ne met pas à jour updated_at lors d'une catégorisation,
     # donc pl_get_modified_since ne les remonte pas. On les re-fetch par date.
+    # Limiter aux dates dans la fenêtre de sync pour éviter un re-fetch massif multi-mois
     uncategorized_in_sb = (
         sb.table("transactions")
         .select("date")
         .eq("category_name", "")
+        .gte("date", date_from.isoformat())
+        .lte("date", date_to.isoformat())
         .execute().data
     )
     if uncategorized_in_sb:
@@ -775,7 +845,7 @@ def run(date_from=None, date_to=None):
         uncateg_dates = sorted({r["date"] for r in uncategorized_in_sb})
         log.info(f"  {len(uncateg_dates)} dates avec tx sans catégorie → re-fetch Pennylane")
         tx_by_id = {tx["id"]: tx for tx in transactions}
-        # Re-fetch par plage (date_min → date_max des dates concernées)
+        # Re-fetch uniquement les dates concernées (dans la fenêtre)
         d_unc_from = date.fromisoformat(uncateg_dates[0])
         d_unc_to   = date.fromisoformat(uncateg_dates[-1])
         refetched  = pl_get_transactions(PENNYLANE_TOKEN, d_unc_from, d_unc_to)
@@ -812,8 +882,15 @@ def run(date_from=None, date_to=None):
     except Exception as e:
         log.warning(f"  enrichissement ledger_entries échoué: {e}")
 
+    # ── 3d. TVA réelle depuis supplier_invoices (prestataires étrangers) ────
+    try:
+        tva_overrides = fetch_supplier_invoice_tva_overrides(PENNYLANE_TOKEN, date_from, date_to)
+    except Exception as e:
+        log.warning(f"  fetch_supplier_invoice_tva_overrides échoué: {e}")
+        tva_overrides = {}
+
     # ── 4. Normalisation + upsert Supabase ────────────────────────────────
-    rows = [r for r in (normalize_transaction(tx, mapping) for tx in transactions) if r]
+    rows = [r for r in (normalize_transaction(tx, mapping, tva_overrides) for tx in transactions) if r]
     if rows:
         # Protection manually_mapped : si une transaction a été catégorisée manuellement
         # ET que Pennylane renvoie toujours categories=[], on ne touche pas à la catégorie.

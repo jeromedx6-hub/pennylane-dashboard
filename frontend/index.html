@@ -4137,6 +4137,7 @@ async function launchSync() {
 
   let _pollCount = 0;
   _syncPoll = setInterval(async () => {
+    try {
     _pollCount++;
     // Timeout 5 min = 150 polls × 2s
     if (_pollCount > 150) {
